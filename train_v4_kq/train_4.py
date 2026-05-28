@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
+from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from sklearn.utils import class_weight
 from sklearn.metrics import classification_report, confusion_matrix
@@ -14,19 +15,44 @@ from tensorflow.keras.layers import Conv1D, MaxPooling1D, LSTM, Dense, Dropout, 
 from tensorflow.keras import regularizers
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 
+# Cấu hình tối ưu GPU cho RTX 2050 (Tránh lỗi OOM - Out of Memory)
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        # Giới hạn TF chỉ dùng lượng VRAM cần thiết thay vì chiếm hết 4GB
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        print(f"[*] Đã kích hoạt Memory Growth cho {len(gpus)} GPU(s).")
+    except RuntimeError as e:
+        print(e)
+
 # Fix unicode hiển thị trên Windows console
 if sys.stdout.encoding.lower() != 'utf-8':
     import codecs
     sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
-# Định nghĩa các thư mục dữ liệu
-CURRENT_DIR = Path(r'c:\Users\hung.vumanh2\Documents\SisFall-PreProcessing')
+# Load biến môi trường từ file .env (nếu có)
+load_dotenv()
+
+# Lấy đường dẫn gốc của project từ .env, nếu không có thì fallback về đường dẫn tương đối (lùi 2 cấp)
+env_root = os.environ.get('PROJECT_ROOT')
+if env_root and os.path.exists(env_root):
+    CURRENT_DIR = Path(env_root)
+else:
+    CURRENT_DIR = Path(__file__).parent.parent
+    
 DATA_DIR = CURRENT_DIR / 'SisFall_dataset_Windowed'
 CACHE_DIR = CURRENT_DIR / 'train_cache'
 CACHE_DIR.mkdir(exist_ok=True)
-OUT_DIR = Path(r'c:\Users\hung.vumanh2\Documents\SisFall-PreProcessing\train_v4_kq')
+OUT_DIR = Path(__file__).parent
 OUT_DIR.mkdir(exist_ok=True)
+
+# Danh sách 6 cột đặc trưng mô phỏng IMU 6 trục MPU6050 (3 trục Gia tốc ADXL345 + 3 trục Góc quay ITG3200)
+REQUIRED_COLUMNS = [
+    'ADXL_X', 'ADXL_Y', 'ADXL_Z', 
+    'ITG_X', 'ITG_Y', 'ITG_Z'
+]
 
 # 1. Ánh xạ 34 nhãn gốc thành 4 lớp (Đã gộp)
 LABEL_MAP = {
@@ -60,7 +86,7 @@ def parse_filename_info(filename):
     return label_code, subject_id
 
 def load_single_csv(file_path):
-    """Đọc dữ liệu từ một file CSV window"""
+    """Đọc dữ liệu từ một file CSV window (6 cột: ADXL_X/Y/Z, ITG_X/Y/Z)"""
     try:
         label_code, subject_id = parse_filename_info(file_path.stem)
         if label_code not in LABEL_MAP:
@@ -68,12 +94,15 @@ def load_single_csv(file_path):
             
         label = LABEL_MAP[label_code]
         
-        # Đọc dữ liệu gia tốc và góc quay (6 cột: ax,ay,az,gx,gy,gz)
         df = pd.read_csv(file_path)
         if len(df) != 200:
             return None # Bỏ qua các file lỗi kích thước
             
-        data = df.to_numpy()
+        # Kiểm tra và chọn đúng 9 cột đặc trưng
+        if not all(col in df.columns for col in REQUIRED_COLUMNS):
+            return None
+            
+        data = df[REQUIRED_COLUMNS].to_numpy()
         return data, label, subject_id
     except Exception as e:
         return None
@@ -98,7 +127,21 @@ def prepare_dataset():
         y_val = np.load(val_cache_y)
         X_test = np.load(test_cache_x)
         y_test = np.load(test_cache_y)
-        return X_train, y_train, X_val, y_val, X_test, y_test
+        
+        # Kiểm tra tính khớp định dạng của cache (Tránh trường hợp cache cũ lưu 6 cột)
+        if X_train.ndim == 3 and X_train.shape[2] == len(REQUIRED_COLUMNS):
+            return X_train, y_train, X_val, y_val, X_test, y_test
+        else:
+            print("[!] Cấu hình số cột dữ liệu thay đổi. Tiến hành xóa cache cũ để tạo lại cache mới (6 cột)...")
+            try:
+                train_cache_x.unlink(missing_ok=True)
+                train_cache_y.unlink(missing_ok=True)
+                val_cache_x.unlink(missing_ok=True)
+                val_cache_y.unlink(missing_ok=True)
+                test_cache_x.unlink(missing_ok=True)
+                test_cache_y.unlink(missing_ok=True)
+            except Exception as ex:
+                print(f"[!] Không thể xóa cache cũ: {ex}")
 
     print("[*] Đang quét thư mục dữ liệu windowed...")
     all_files = list(DATA_DIR.rglob('*.csv'))
@@ -264,17 +307,12 @@ def main():
     
     
     # Báo cáo kết quả
-    report_str = "
-" + "="*50 + "
-"
-    report_str += "BÁO CÁO PHÂN LOẠI TRÊN TẬP KIỂM THỬ (TEST SET)
-"
-    report_str += "="*50 + "
-"
+    report_str = "\n" + "="*50 + "\n"
+    report_str += "BÁO CÁO PHÂN LOẠI TRÊN TẬP KIỂM THỬ (TEST SET)\n"
+    report_str += "="*50 + "\n"
     
     cls_report = classification_report(y_test, y_pred, target_names=CLASS_NAMES, digits=4)
-    report_str += cls_report + "
-"
+    report_str += cls_report + "\n"
     
     print(report_str)
     
@@ -305,9 +343,7 @@ def main():
     plt.close()
     print("[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v4.png'")
     
-    report_str += "
-[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v4.png'
-"
+    report_str += "\n[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v4.png'\n"
     
     # Kiểm tra chỉ số Recall của lớp Fall (nhãn 3)
     fall_idx = 3
@@ -315,26 +351,17 @@ def main():
     detected_falls = cm[fall_idx, fall_idx]
     recall_fall = (detected_falls / true_falls) * 100 if true_falls > 0 else 0
     
-    eval_str = "
-" + "="*50 + "
-"
-    eval_str += "KẾT QUẢ ĐÁNH GIÁ CHUYÊN BIỆT LỚP TÉ NGÃ (FALL):
-"
-    eval_str += f"  - Số ca ngã thực tế trong tập Test: {true_falls}
-"
-    eval_str += f"  - Số ca ngã mô hình phát hiện đúng: {detected_falls}
-"
-    eval_str += f"  - TỶ LỆ RECALL PHÁT HIỆN TÉ NGÃ:    {recall_fall:.2f}%
-"
+    eval_str = "\n" + "="*50 + "\n"
+    eval_str += "KẾT QUẢ ĐÁNH GIÁ CHUYÊN BIỆT LỚP TÉ NGÃ (FALL):\n"
+    eval_str += f"  - Số ca ngã thực tế trong tập Test: {true_falls}\n"
+    eval_str += f"  - Số ca ngã mô hình phát hiện đúng: {detected_falls}\n"
+    eval_str += f"  - TỶ LỆ RECALL PHÁT HIỆN TÉ NGÃ:    {recall_fall:.2f}%\n"
     
     if recall_fall >= 95.0:
-        eval_str += "  => ĐẠT TIÊU CHUẨN! (Recall >= 95%)
-"
+        eval_str += "  => ĐẠT TIÊU CHUẨN! (Recall >= 95%)\n"
     else:
-        eval_str += "  => CẦN CẢI THIỆN! (Recall < 95%)
-"
-    eval_str += "="*50 + "
-"
+        eval_str += "  => CẦN CẢI THIỆN! (Recall < 95%)\n"
+    eval_str += "="*50 + "\n"
     
     print(eval_str)
     report_str += eval_str
@@ -342,7 +369,7 @@ def main():
     # Ghi report ra file
     with open(OUT_DIR / 'report.txt', 'w', encoding='utf-8') as rf:
         rf.write(report_str)
-    print(f"[*] Đã lưu toàn bộ báo cáo vào {{OUT_DIR / 'report.txt'}}")
+    print(f"[*] Đã lưu toàn bộ báo cáo vào {OUT_DIR / 'report.txt'}")
 
 if __name__ == '__main__':
 

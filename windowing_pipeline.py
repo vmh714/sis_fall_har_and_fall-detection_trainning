@@ -3,41 +3,49 @@ import numpy as np
 from pathlib import Path
 import warnings
 import sys
+import os
+from dotenv import load_dotenv
 
 warnings.filterwarnings('ignore')
 
 def extract_fall_windows(df):
-    """Trích xuất 3 window xung quanh đỉnh gia tốc (Peak Detection) cho Fall data"""
-    svm = np.sqrt(df['ax']**2 + df['ay']**2 + df['az']**2)
+    """Trích xuất các window xung quanh đỉnh gia tốc (Peak Detection) cho Fall data.
+    Shift mỗi window 50 mẫu (phù hợp với hardware FIFO 50 mẫu)."""
+    # Tính SVM sử dụng cột ADXL_X, ADXL_Y, ADXL_Z từ file csv đã preprocess
+    svm = np.sqrt(df['ADXL_X']**2 + df['ADXL_Y']**2 + df['ADXL_Z']**2)
     peak_idx = svm.argmax()
     
     windows = []
-    # W1: Center
-    w1_s, w1_e = peak_idx - 100, peak_idx + 100
-    if w1_s >= 0 and w1_e <= len(df):
-        windows.append(df.iloc[w1_s:w1_e])
-        
-    # W2: Left shift
-    w2_s, w2_e = peak_idx - 50, peak_idx + 150
-    if w2_s >= 0 and w2_e <= len(df):
-        windows.append(df.iloc[w2_s:w2_e])
-        
-    # W3: Right shift
-    w3_s, w3_e = peak_idx - 150, peak_idx + 50
-    if w3_s >= 0 and w3_e <= len(df):
-        windows.append(df.iloc[w3_s:w3_e])
-        
+    # Lấy các window xung quanh điểm ngã, tịnh tiến mỗi 50 mẫu
+    # Các độ lệch (shift) so với center (-100, -50, 0, 50, 100)
+    shifts = [-100, -50, 0, 50, 100]
+    
+    for shift in shifts:
+        start = peak_idx - 100 + shift
+        end = start + 200
+        if start >= 0 and end <= len(df):
+            windows.append(df.iloc[start:end])
+            
     return windows
 
-def extract_adl_windows(df, window_size=200, step_size=100):
-    """Trích xuất sliding window (200 mẫu, overlap 100 mẫu) cho ADL data"""
+def extract_adl_windows(df, window_size=200, step_size=50):
+    """Trích xuất sliding window (200 mẫu, overlap 150 mẫu do dịch 50 mẫu/lần) cho ADL data"""
     windows = []
     for start in range(0, len(df) - window_size + 1, step_size):
         windows.append(df.iloc[start:start + window_size])
     return windows
 
 def process_all_windows():
-    current_dir = Path(__file__).parent
+    # Load biến môi trường từ file .env
+    load_dotenv()
+    
+    # Lấy đường dẫn gốc của project từ .env, nếu không có thì dùng thư mục chứa script
+    env_root = os.environ.get('PROJECT_ROOT')
+    if env_root and os.path.exists(env_root):
+        current_dir = Path(env_root)
+    else:
+        current_dir = Path(__file__).parent
+        
     input_dir = current_dir / 'SisFall_dataset_Processed'
     output_dir = current_dir / 'SisFall_dataset_Windowed'
     

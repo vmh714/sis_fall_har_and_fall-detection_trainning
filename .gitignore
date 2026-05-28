@@ -3,6 +3,7 @@
 # ==========================================
 
 # 1. Virtual Environment & Python Caches
+.env
 venv/
 __pycache__/
 *.py[cod]
@@ -11,7 +12,7 @@ __pycache__/
 # 2. Dữ liệu (Datasets) và File nén
 SisFall_dataset/
 SisFall_dataset_Processed/
-SisFall_dataset_Windowed/
+SisFall_dataset_Windowed/  # Bỏ comment để upload thư mục này
 archive.zip
 *.zip
 *.7z
@@ -33,9 +34,9 @@ model_data.cc
 model_data.h
 
 # 6. Hình ảnh và biểu đồ (Plots)
-*.png
-*.jpg
-*.jpeg
+# *.png 
+# *.jpg
+# *.jpeg
 
 # 7. Cấu hình IDE & HĐH
 .vscode/
