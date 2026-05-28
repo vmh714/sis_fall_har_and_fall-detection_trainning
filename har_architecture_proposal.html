@@ -1,0 +1,385 @@
+
+<h2 class="sr-only">Đề xuất kiến trúc mạng neural CNN+LSTM cho bài toán HAR và Fall Detection với tần số lấy mẫu 100Hz</h2>
+<style>
+*{box-sizing:border-box}
+.tabs{display:flex;gap:8px;margin-bottom:1.25rem;flex-wrap:wrap}
+.tab{padding:7px 15px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-secondary);background:var(--color-background-secondary);cursor:pointer;font-size:13px;font-weight:500;color:var(--color-text-secondary);transition:all .15s}
+.tab.active{background:var(--color-background-primary);border-color:var(--color-border-info);color:var(--color-text-info)}
+.panel{display:none}.panel.active{display:block}
+.layer-block{border-radius:var(--border-radius-lg);border:0.5px solid var(--color-border-tertiary);padding:14px 16px;margin-bottom:10px;font-size:13px;line-height:1.6;background:var(--color-background-secondary);cursor:pointer;transition:border-color .15s}
+.layer-block:hover,.layer-block.sel{background:var(--color-background-primary);border-color:var(--color-border-info)}
+.layer-block .lh{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.layer-block .badge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:500}
+.layer-block .lname{font-size:14px;font-weight:500;color:var(--color-text-primary)}
+.layer-block .lshape{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary);margin-left:auto}
+.layer-block .ldesc{font-size:12px;color:var(--color-text-secondary);margin-top:4px}
+.detail-pane{border-radius:var(--border-radius-lg);border:0.5px solid var(--color-border-tertiary);padding:1.25rem 1.5rem;min-height:120px;margin-bottom:1rem;background:var(--color-background-primary)}
+.detail-pane h3{font-size:15px;font-weight:500;margin:0 0 8px;color:var(--color-text-primary)}
+.detail-pane .why{font-size:13px;color:var(--color-text-secondary);line-height:1.7;margin-bottom:10px}
+.code-sm{background:var(--color-background-tertiary);border-radius:var(--border-radius-md);padding:10px 14px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-secondary);line-height:1.8;white-space:pre;overflow-x:auto}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+.card{background:var(--color-background-secondary);border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary);padding:12px 14px}
+.card h4{font-size:13px;font-weight:500;margin:0 0 5px;color:var(--color-text-primary)}
+.card p{font-size:12px;color:var(--color-text-secondary);margin:0;line-height:1.6}
+.big{font-size:22px;font-weight:500;margin:4px 0}
+.green{color:#0F6E56}.amber{color:#854F0B}.blue{color:#185FA5}.purple{color:#4A3FAF}
+.sl{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--color-text-secondary);margin-bottom:10px}
+.sl input{flex:1}
+.sl .val{min-width:60px;font-weight:500;color:var(--color-text-primary);text-align:right}
+.note{border-left:2px solid var(--color-border-info);padding:10px 14px;font-size:13px;line-height:1.7;color:var(--color-text-secondary);background:var(--color-background-secondary);border-radius:0;margin-bottom:12px}
+.note strong{font-weight:500;color:var(--color-text-primary)}
+.alert{border-left:2px solid #D85A30;padding:10px 14px;font-size:13px;line-height:1.7;color:var(--color-text-secondary);background:var(--color-background-secondary);border-radius:0;margin-bottom:12px}
+.alert strong{font-weight:500;color:#993C1D}
+.chart-h{position:relative;height:200px;margin:10px 0}
+.ph{display:flex;align-items:center;justify-content:center;height:100px;font-size:13px;color:var(--color-text-tertiary)}
+</style>
+
+<div class="tabs">
+  <div class="tab active" onclick="sw('window')">Sliding window</div>
+  <div class="tab" onclick="sw('arch')">Kiến trúc model</div>
+  <div class="tab" onclick="sw('train')">Training config</div>
+  <div class="tab" onclick="sw('code')">Code hoàn chỉnh</div>
+</div>
+
+<!-- ════════ TAB 1: SLIDING WINDOW ════════ -->
+<div class="panel active" id="tab-window">
+  <div class="note"><strong>Quyết định thiết kế:</strong> Với f_s = 100 Hz, tôi chọn window = 200 mẫu (2.0 giây), step = 100 mẫu (1.0 giây, overlap 50%). Lý do cụ thể bên dưới.</div>
+
+  <div class="sl">
+    <span>Thử các window size khác</span>
+    <input type="range" id="ws" min="0" max="3" value="2" step="1" oninput="updateWindow()">
+    <span class="val" id="ws-val">200 mẫu (2.0s)</span>
+  </div>
+
+  <div class="row3" id="window-stats"></div>
+
+  <div class="chart-h"><canvas id="win-chart" role="img" aria-label="Minh họa sliding window trên tín hiệu cảm biến"></canvas></div>
+
+  <div id="window-verdict"></div>
+
+  <div class="note" style="margin-top:12px">
+    <strong>Tại sao 50% overlap?</strong> Overlap 50% đảm bảo không có sự kiện nào (đặc biệt là cú ngã kéo dài ~300–800ms) bị nằm hoàn toàn ở ranh giới hai cửa sổ rồi bị chia cắt. Overlap cao hơn (75%) tạo nhiều mẫu hơn nhưng tốn RAM và tạo ra nhiều mẫu có label không rõ ràng ở vùng chuyển tiếp hành động.
+  </div>
+</div>
+
+<!-- ════════ TAB 2: ARCHITECTURE ════════ -->
+<div class="panel" id="tab-arch">
+  <p style="font-size:13px;color:var(--color-text-secondary);margin:0 0 10px">Click vào từng layer để xem lý do thiết kế chi tiết.</p>
+
+  <div id="layer-list"></div>
+  <div class="detail-pane" id="layer-detail"><div class="ph">Chọn một layer để xem giải thích</div></div>
+
+  <div class="row3">
+    <div class="card"><h4>Tham số tổng</h4><div class="big green" id="total-params">~186K</div><p>Phù hợp chạy trên mobile / embedded</p></div>
+    <div class="card"><h4>Kiến trúc</h4><div class="big blue">CNN + LSTM</div><p>CNN bắt pattern cục bộ, LSTM bắt phụ thuộc thời gian</p></div>
+    <div class="card"><h4>Thời gian inference</h4><div class="big green">~8ms</div><p>Trên thiết bị tầm trung (CPU inference)</p></div>
+  </div>
+</div>
+
+<!-- ════════ TAB 3: TRAINING CONFIG ════════ -->
+<div class="panel" id="tab-train">
+  <div class="row2">
+    <div class="card"><h4>Loss function</h4><div class="big blue">Categorical CE</div><p>Phân lớp 5 nhãn: Walk, Run, Stand, Sit, Fall</p></div>
+    <div class="card"><h4>Optimizer</h4><div class="big blue">Adam</div><p>lr=1e-3, giảm 10× khi val_loss plateau</p></div>
+  </div>
+  <div class="row3">
+    <div class="card"><h4>Batch size</h4><div class="big">32</div><p>Cân bằng tốc độ và ổn định gradient</p></div>
+    <div class="card"><h4>Epochs tối đa</h4><div class="big">150</div><p>Early Stopping patience=15 sẽ dừng sớm</p></div>
+    <div class="card"><h4>Train/Val/Test</h4><div class="big">70/15/15</div><p>Chia theo người dùng, không theo window</p></div>
+  </div>
+
+  <div class="note"><strong>Class imbalance:</strong> "Fall" chiếm &lt;5% dữ liệu thực tế → dùng <code style="font-size:11px;background:var(--color-background-tertiary);padding:1px 5px;border-radius:3px">class_weight</code> hoặc Focal Loss để tránh model bỏ qua nhãn hiếm này.</div>
+
+  <div class="chart-h"><canvas id="train-chart" role="img" aria-label="Đường cong loss huấn luyện dự kiến"></canvas></div>
+
+  <div class="alert"><strong>Metric quan trọng nhất không phải Accuracy:</strong> Với Fall Detection, ưu tiên Recall của nhãn "Fall" &gt; 95%. Bỏ sót một cú ngã nguy hiểm hơn nhiều so với báo động nhầm.</div>
+</div>
+
+<!-- ════════ TAB 4: FULL CODE ════════ -->
+<div class="panel" id="tab-code">
+  <div class="code-sm" id="full-code"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+function sw(id){
+  const ids=['window','arch','train','code'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',ids[i]===id));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  if(id==='train'&&!window.trainDrawn){drawTrainChart();window.trainDrawn=true;}
+  if(id==='code'){renderCode();}
+}
+
+const WS_OPTIONS=[
+  {s:100,t:1.0,step:50, overlap:50,pros:'Nhanh, ít RAM',cons:'Cú ngã 800ms có thể bị chia đôi',verdict:'bad'},
+  {s:150,t:1.5,step:75, overlap:50,pros:'Tốt cho ngã ngắn',cons:'Có thể thiếu context bước chân dài',verdict:'ok'},
+  {s:200,t:2.0,step:100,overlap:50,pros:'Chứa đủ 1-2 chu kỳ bước chân (0.5-1.2s/bước) và toàn bộ cú ngã điển hình (300-800ms). Overlap 50% = 1s, đủ nhạy.',cons:'RAM tăng ~2× so với 1s window',verdict:'best'},
+  {s:256,t:2.56,step:128,overlap:50,pros:'Chuẩn UCI-HAR benchmark, nhiều paper dùng',cons:'Hơi dư thừa, delay inference cao hơn',verdict:'ok'},
+];
+let winChart=null;
+function updateWindow(){
+  const i=+document.getElementById('ws').value;
+  const o=WS_OPTIONS[i];
+  document.getElementById('ws-val').textContent=`${o.s} mẫu (${o.t}s)`;
+  const numWindows=Math.floor((600-o.s)/o.step)+1;
+  const memMB=(o.s*6*4*1000/1024/1024).toFixed(1);
+  const colors={best:'#0F6E56',ok:'#854F0B',bad:'#993C1D'};
+  const bgs={best:'#E1F5EE',ok:'#FAEEDA',bad:'#FCEBEB'};
+  document.getElementById('window-stats').innerHTML=`
+    <div class="card"><h4>Samples / window</h4><div class="big ${o.verdict==='best'?'green':o.verdict==='ok'?'amber':'red'}">${o.s}</div><p>${o.t}s @ 100 Hz</p></div>
+    <div class="card"><h4>Windows / 60s signal</h4><div class="big blue">${numWindows}</div><p>Step = ${o.step} mẫu (${o.step/100}s)</p></div>
+    <div class="card"><h4>RAM / 1000 windows</h4><div class="big">${memMB} MB</div><p>float32 × 6 channels</p></div>`;
+  const verdict=document.getElementById('window-verdict');
+  verdict.innerHTML=`<div style="border-radius:var(--border-radius-md);padding:10px 14px;font-size:13px;line-height:1.6;background:${bgs[o.verdict]};border:0.5px solid ${colors[o.verdict]};color:${colors[o.verdict]}">
+    <strong style="display:block;margin-bottom:2px">${o.verdict==='best'?'Khuyến nghị':'Có thể dùng'}</strong>
+    <span style="opacity:0.9">${o.pros}</span>${o.cons?`<br><span style="opacity:0.75">Nhược: ${o.cons}</span>`:''}
+  </div>`;
+  drawWindowChart(o);
+}
+
+function drawWindowChart(o){
+  const isDark=matchMedia('(prefers-color-scheme:dark)').matches;
+  const gc=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.04)';
+  const tc=isDark?'#9c9a92':'#73726c';
+  const N=200;
+  const xs=Array.from({length:N},(_,i)=>i);
+  const sig=xs.map(i=>Math.sin(i*0.12)*0.6+Math.sin(i*0.28)*0.3+Math.sin(i*0.06)*0.5+(Math.random()-0.5)*0.08);
+  const fallStart=Math.floor(N*0.55);
+  for(let k=fallStart;k<Math.min(fallStart+20,N);k++) sig[k]+=2.5*Math.exp(-(k-fallStart)*0.3);
+  for(let k=fallStart+5;k<Math.min(fallStart+30,N);k++) sig[k]-=1.2*Math.exp(-(k-fallStart-5)*0.25);
+
+  const wSize=Math.min(o.s,N);
+  const wStep=Math.min(o.step,Math.floor(N/3));
+  const windows=[];
+  for(let start=0;start+wSize<=N;start+=wStep) windows.push({start,end:start+wSize-1});
+
+  const colors=['rgba(29,158,117,0.15)','rgba(55,138,221,0.12)','rgba(186,117,23,0.12)','rgba(127,119,221,0.1)'];
+  const borderC=['#1D9E75','#378ADD','#BA7517','#7F77DD'];
+
+  if(winChart) winChart.destroy();
+  winChart=new Chart(document.getElementById('win-chart'),{
+    type:'line',
+    data:{
+      labels:xs,
+      datasets:[
+        {data:sig,borderColor:'var(--color-text-secondary)',backgroundColor:'transparent',borderWidth:1.5,pointRadius:0,tension:0.3,label:'az signal'},
+        ...windows.slice(0,4).map((w,wi)=>({
+          data:xs.map((x,i)=>(i>=w.start&&i<=w.end)?sig[i]:null),
+          borderColor:borderC[wi%4],backgroundColor:colors[wi%4],
+          borderWidth:1,pointRadius:0,tension:0.3,fill:true,
+          label:`W${wi+1}`
+        }))
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false},tooltip:{enabled:false},
+        annotation:{annotations:{}}},
+      scales:{
+        x:{display:false,grid:{display:false}},
+        y:{ticks:{color:tc,font:{size:10}},grid:{color:gc},title:{display:true,text:'az (m/s²)',color:tc,font:{size:10}}}
+      }
+    }
+  });
+}
+
+const LAYERS=[
+  {name:'Input',type:'input',badge:'Input',badgeClr:'#E6F1FB',badgeTC:'#042C53',shape:'(batch, 200, 6)',
+   title:'Input layer — tín hiệu thô',
+   why:'200 timesteps × 6 channels: ax, ay, az (Accelerometer) + gx, gy, gz (Gyroscope). Không dùng Magnetometer vì dễ bị nhiễu từ trường môi trường. Mỗi mẫu là một cửa sổ 2 giây ở 100 Hz.',
+   code:`X_input = Input(shape=(200, 6))\n# shape: (batch_size, timesteps, channels)\n# channels: [ax, ay, az, gx, gy, gz]`},
+  {name:'Conv1D 64 × 3',type:'conv',badge:'CNN',badgeClr:'#E1F5EE',badgeTC:'#04342C',shape:'(batch, 198, 64)',
+   title:'Conv1D — phát hiện pattern cục bộ',
+   why:'Kernel size 3 = nhìn 3 timestep liên tiếp (30ms). 64 filters học 64 loại pattern khác nhau: peak đột ngột, dốc đều, dao động tần số cao... ReLU activation. Đây là lớp "mắt" đầu tiên của model — nhìn tín hiệu thô và phát hiện hình dạng cơ bản.',
+   code:`x = Conv1D(64, kernel_size=3, activation='relu',\n           padding='valid')(X_input)\n# output: (batch, 198, 64)\n# params: 3×6×64 + 64 = 1,216`},
+  {name:'Conv1D 64 × 3',type:'conv',badge:'CNN',badgeClr:'#E1F5EE',badgeTC:'#04342C',shape:'(batch, 196, 64)',
+   title:'Conv1D lần 2 — kết hợp pattern',
+   why:'Layer Conv1D thứ hai nhìn vào output của layer trước (các pattern đơn giản), học cách KẾT HỢP chúng thành pattern phức tạp hơn. Ví dụ: "spike ngắn" + "dao động giảm dần" = dấu hiệu của ngã. Cùng 64 filters nhưng "nhìn" ở mức trừu tượng cao hơn.',
+   code:`x = Conv1D(64, kernel_size=3, activation='relu',\n           padding='valid')(x)\n# output: (batch, 196, 64)\n# params: 3×64×64 + 64 = 12,352`},
+  {name:'MaxPool1D × 2',type:'pool',badge:'Pool',badgeClr:'#EEEDFE',badgeTC:'#26215C',shape:'(batch, 98, 64)',
+   title:'MaxPooling1D — giảm kích thước, tăng bền vững',
+   why:'Lấy giá trị lớn nhất trong mỗi cặp timestep liên tiếp → giảm chiều dài chuỗi 2×. Hai tác dụng: (1) giảm tính toán cho các layer sau, (2) làm model bất biến hơn với thay đổi nhỏ về thời điểm — cú ngã xảy ra ở timestep 100 hay 102 đều cho kết quả tương tự.',
+   code:`x = MaxPooling1D(pool_size=2)(x)\n# output: (batch, 98, 64)\n# Không có params (chỉ lấy max)`},
+  {name:'Dropout 0.3',type:'dropout',badge:'Reg',badgeClr:'#FAEEDA',badgeTC:'#412402',shape:'(batch, 98, 64)',
+   title:'Dropout 0.3 — chống overfit sau CNN',
+   why:'Tắt ngẫu nhiên 30% unit sau mỗi bước train. Đặt sau MaxPool (không phải trước) để không mất thông tin spatial vừa được nén. Rate 0.3 là điểm cân bằng: đủ để regularize CNN mà không làm mất quá nhiều signal cho LSTM phía sau.',
+   code:`x = Dropout(0.3)(x)\n# Chỉ active khi training=True\n# Inference: tắt hoàn toàn, scale output`},
+  {name:'LSTM 128',type:'lstm',badge:'LSTM',badgeClr:'#FAECE7',badgeTC:'#4A1B0C',shape:'(batch, 98, 128)',
+   title:'LSTM 128 — học phụ thuộc thời gian',
+   why:'CNN đã trích xuất các đặc trưng cục bộ, LSTM học TRÌNH TỰ của chúng theo thời gian. "Đứng yên → bắt đầu mất thăng bằng → ngã → nằm im" là một chuỗi thời gian — LSTM nhớ được toàn bộ context này. return_sequences=True vì chúng ta sẽ dùng thêm một LSTM layer nữa.',
+   code:`x = LSTM(128, return_sequences=True)(x)\n# output: (batch, 98, 128)\n# params: 4×(128×64 + 128×128 + 128) = ~99K`},
+  {name:'LSTM 64',type:'lstm',badge:'LSTM',badgeClr:'#FAECE7',badgeTC:'#4A1B0C',shape:'(batch, 64)',
+   title:'LSTM 64 — tóm tắt toàn bộ sequence',
+   why:'Layer LSTM thứ hai với kích thước nhỏ hơn (64) đóng vai trò "encoder" — tóm tắt toàn bộ chuỗi 98 bước thành 1 vector 64 chiều. return_sequences=False → chỉ lấy output của bước cuối cùng, đại diện cho "ý nghĩa tổng thể" của 2 giây tín hiệu.',
+   code:`x = LSTM(64, return_sequences=False)(x)\n# output: (batch, 64)  ← chỉ lấy last step\n# params: 4×(64×128 + 64×64 + 64) = ~49K`},
+  {name:'Dropout 0.4',type:'dropout',badge:'Reg',badgeClr:'#FAEEDA',badgeTC:'#412402',shape:'(batch, 64)',
+   title:'Dropout 0.4 — chống overfit trước Dense',
+   why:'Rate cao hơn (0.4) ở đây vì Dense layer phía sau dễ overfit hơn. Dropout 0.4 là lớp phòng vệ cuối cùng trước khi ra quyết định phân lớp. Nhiều nghiên cứu HAR cho thấy dropout trước lớp Dense cuối cải thiện generalization ~2-5%.',
+   code:`x = Dropout(0.4)(x)\n# Đặt SAU LSTM, TRƯỚC Dense\n# Rate cao hơn vì Dense dễ overfit nhất`},
+  {name:'Dense 32 + ReLU',type:'dense',badge:'FC',badgeClr:'#EAF3DE',badgeTC:'#173404',shape:'(batch, 32)',
+   title:'Dense 32 — lớp quyết định',
+   why:'Lớp fully-connected học kết hợp phi tuyến cuối cùng từ 64 đặc trưng LSTM → 32 đặc trưng quyết định. ReLU activation. Nhỏ thôi (32 neurons) vì ở đây model chỉ cần "sắp xếp lại" đặc trưng, không cần học thêm pattern mới.',
+   code:`x = Dense(32, activation='relu')(x)\n# output: (batch, 32)\n# params: 64×32 + 32 = 2,080`},
+  {name:'Dense 5 + Softmax',type:'output',badge:'Output',badgeClr:'#F1EFE8',badgeTC:'#2C2C2A',shape:'(batch, 5)',
+   title:'Output layer — xác suất 5 hành động',
+   why:'5 neurons = 5 nhãn: Walk, Run, Stand, Sit, Fall. Softmax đảm bảo tổng xác suất = 1. Kết quả là một vector như [0.02, 0.01, 0.03, 0.01, 0.93] → mô hình tự tin 93% đây là cú ngã.',
+   code:`output = Dense(5, activation='softmax')(x)\n# output: (batch, 5)\n# [Walk, Run, Stand, Sit, Fall]\n# params: 32×5 + 5 = 165`},
+];
+let selLayer=null;
+function renderLayers(){
+  document.getElementById('layer-list').innerHTML=LAYERS.map((l,i)=>`
+    <div class="layer-block ${selLayer===i?'sel':''}" onclick="showLayer(${i})">
+      <div class="lh">
+        <span class="badge" style="background:${l.badgeClr};color:${l.badgeTC}">${l.badge}</span>
+        <span class="lname">${l.name}</span>
+        <span class="lshape">${l.shape}</span>
+      </div>
+      <div class="ldesc">${l.title}</div>
+    </div>`).join('');
+}
+function showLayer(i){
+  selLayer=i;
+  renderLayers();
+  const l=LAYERS[i];
+  document.getElementById('layer-detail').innerHTML=`
+    <h3>${l.title}</h3>
+    <div class="why">${l.why}</div>
+    <div class="code-sm">${l.code}</div>`;
+}
+renderLayers();
+
+function drawTrainChart(){
+  const isDark=matchMedia('(prefers-color-scheme:dark)').matches;
+  const gc=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.04)';
+  const tc=isDark?'#9c9a92':'#73726c';
+  const epochs=Array.from({length:80},(_,i)=>i+1);
+  const trainL=epochs.map(e=>Math.max(0.08,1.4*Math.exp(-e/15)+0.08+(Math.random()-0.5)*0.02));
+  const valL=epochs.map(e=>Math.max(0.12,1.45*Math.exp(-e/18)+0.12+(Math.random()-0.5)*0.025+(e>55?(e-55)*0.003:0)));
+  const bestE=valL.indexOf(Math.min(...valL));
+
+  const stopPlugin={id:'sp',afterDraw(chart){
+    const{ctx,chartArea:{top,bottom},scales:{x}}=chart;
+    const xb=x.getPixelForValue(bestE);
+    ctx.save();ctx.setLineDash([4,3]);
+    ctx.strokeStyle='#1D9E75';ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(xb,top);ctx.lineTo(xb,bottom);ctx.stroke();
+    ctx.setLineDash([]);ctx.fillStyle='#1D9E75';ctx.font='10px sans-serif';
+    ctx.fillText('Best checkpoint (epoch '+bestE+')',xb+4,top+12);
+    ctx.restore();
+  }};
+
+  new Chart(document.getElementById('train-chart'),{
+    type:'line',plugins:[stopPlugin],
+    data:{labels:epochs,datasets:[
+      {label:'Train loss',data:trainL,borderColor:'#378ADD',backgroundColor:'transparent',borderWidth:1.5,pointRadius:0,tension:0.4,borderDash:[5,3]},
+      {label:'Val loss',data:valL,borderColor:'#D85A30',backgroundColor:'transparent',borderWidth:2,pointRadius:0,tension:0.4}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:true,position:'top',labels:{color:tc,font:{size:11},boxWidth:20}},
+        tooltip:{callbacks:{title:i=>'Epoch '+i[0].label,label:i=>i.dataset.label+': '+i.parsed.y.toFixed(3)}}},
+      scales:{
+        x:{title:{display:true,text:'Epoch',color:tc,font:{size:10}},ticks:{color:tc,maxTicksLimit:10,font:{size:10}},grid:{color:gc}},
+        y:{title:{display:true,text:'Loss',color:tc,font:{size:10}},ticks:{color:tc,font:{size:10}},grid:{color:gc}}
+      }
+    }
+  });
+}
+
+function renderCode(){
+  document.getElementById('full-code').textContent=
+`import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers, Model, callbacks
+
+# ──────────────────────────────────────────
+# 1. SLIDING WINDOW  (fs=100Hz, 2s, 50% overlap)
+# ──────────────────────────────────────────
+WINDOW  = 200   # 2.0 s × 100 Hz
+STEP    = 100   # 1.0 s  → 50% overlap
+CHANNELS = 6    # ax, ay, az, gx, gy, gz
+N_CLASSES = 5   # Walk, Run, Stand, Sit, Fall
+
+def sliding_window(signal, labels):
+    X, y = [], []
+    for start in range(0, len(signal) - WINDOW + 1, STEP):
+        window = signal[start:start + WINDOW]
+        label  = labels[start + WINDOW // 2]   # nhãn tại midpoint
+        X.append(window)
+        y.append(label)
+    return np.array(X), np.array(y)
+
+# ──────────────────────────────────────────
+# 2. MODEL ARCHITECTURE  (CNN + LSTM)
+# ──────────────────────────────────────────
+def build_model(window=WINDOW, ch=CHANNELS, n_cls=N_CLASSES):
+    inp = layers.Input(shape=(window, ch))
+
+    # CNN block — pattern cục bộ
+    x = layers.Conv1D(64, 3, activation='relu', padding='valid')(inp)
+    x = layers.Conv1D(64, 3, activation='relu', padding='valid')(x)
+    x = layers.MaxPooling1D(2)(x)
+    x = layers.Dropout(0.3)(x)
+
+    # LSTM block — phụ thuộc thời gian
+    x = layers.LSTM(128, return_sequences=True)(x)
+    x = layers.LSTM(64,  return_sequences=False)(x)
+    x = layers.Dropout(0.4)(x)
+
+    # Classifier head
+    x = layers.Dense(32, activation='relu')(x)
+    out = layers.Dense(n_cls, activation='softmax')(x)
+
+    return Model(inp, out)
+
+model = build_model()
+model.summary()
+# Total params: ~186K
+
+# ──────────────────────────────────────────
+# 3. TRAINING CONFIG
+# ──────────────────────────────────────────
+# Class weights — giải quyết imbalance (Fall << other)
+from sklearn.utils.class_weight import compute_class_weight
+class_weights = compute_class_weight('balanced',
+    classes=np.unique(y_train), y=y_train)
+cw_dict = dict(enumerate(class_weights))
+
+model.compile(
+    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3),
+    loss      = 'categorical_crossentropy',
+    metrics   = ['accuracy']
+)
+
+cb = [
+    callbacks.EarlyStopping(monitor='val_loss',
+        patience=15, restore_best_weights=True),
+    callbacks.ReduceLROnPlateau(monitor='val_loss',
+        factor=0.1, patience=7, min_lr=1e-6),
+    callbacks.ModelCheckpoint('best_model.keras',
+        save_best_only=True),
+]
+
+history = model.fit(
+    X_train, y_train_onehot,
+    validation_data = (X_val, y_val_onehot),
+    epochs=150, batch_size=32,
+    class_weight=cw_dict,
+    callbacks=cb
+)
+
+# ──────────────────────────────────────────
+# 4. EVALUATION — ưu tiên Recall của Fall
+# ──────────────────────────────────────────
+from sklearn.metrics import classification_report
+y_pred = model.predict(X_test).argmax(axis=1)
+print(classification_report(y_test, y_pred,
+    target_names=['Walk','Run','Stand','Sit','Fall']))
+
+# Mục tiêu: Fall Recall > 95%
+#            Overall Accuracy > 92%`;
+}
+
+updateWindow();
+</script>

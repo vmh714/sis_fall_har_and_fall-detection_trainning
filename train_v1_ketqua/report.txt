@@ -1,0 +1,23 @@
+==================================================
+BÁO CÁO PHÂN LOẠI TRÊN TẬP KIỂM THỬ (TEST SET)
+==================================================
+              precision    recall  f1-score   support
+
+        Walk     0.8550    0.8657    0.8603      2248
+         Run     0.9289    0.9751    0.9514      1085
+  Static/ADL     0.9401    0.9213    0.9306      4000
+        Fall     0.9777    0.9733    0.9755       450
+
+    accuracy                         0.9157      7783
+   macro avg     0.9254    0.9338    0.9294      7783
+weighted avg     0.9161    0.9157    0.9158      7783
+
+[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v1.png'
+
+==================================================
+KẾT QUẢ ĐÁNH GIÁ CHUYÊN BIỆT LỚP TÉ NGÃ (FALL):
+  - Số ca ngã thực tế trong tập Test: 450
+  - Số ca ngã mô hình phát hiện đúng: 438
+  - TỶ LỆ RECALL PHÁT HIỆN TÉ NGÃ:    97.33%
+  => ĐẠT TIÊU CHUẨN! (Recall >= 95%)
+==================================================
