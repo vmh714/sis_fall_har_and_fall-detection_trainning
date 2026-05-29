@@ -9,8 +9,8 @@ from sklearn.utils import class_weight
 from sklearn.metrics import classification_report, confusion_matrix
 
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, LSTM, Dense, Dropout, Input, BatchNormalization
+from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, GlobalMaxPooling1D, LSTM, Dense, Dropout, Input, BatchNormalization, Concatenate
 from tensorflow.keras import regularizers
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 
@@ -23,9 +23,9 @@ if sys.stdout.encoding.lower() != 'utf-8':
 # Định nghĩa các thư mục dữ liệu
 CURRENT_DIR = Path(r'c:\Users\hung.vumanh2\Documents\SisFall-PreProcessing')
 DATA_DIR = CURRENT_DIR / 'SisFall_dataset_Windowed'
-CACHE_DIR = CURRENT_DIR / 'train_cache'
+CACHE_DIR = CURRENT_DIR / 'train_cache_9f'
 CACHE_DIR.mkdir(exist_ok=True)
-OUT_DIR = Path(r'c:\Users\hung.vumanh2\Documents\SisFall-PreProcessing\train_v4_kq')
+OUT_DIR = Path(r'c:\Users\hung.vumanh2\Documents\SisFall-PreProcessing\train_v7_kq')
 OUT_DIR.mkdir(exist_ok=True)
 
 # 1. Ánh xạ 34 nhãn gốc thành 4 lớp (Đã gộp)
@@ -60,7 +60,7 @@ def parse_filename_info(filename):
     return label_code, subject_id
 
 def load_single_csv(file_path):
-    """Đọc dữ liệu từ một file CSV window"""
+    """Đọc dữ liệu từ một file CSV window và tính toán thêm Pitch, Roll, SVM"""
     try:
         label_code, subject_id = parse_filename_info(file_path.stem)
         if label_code not in LABEL_MAP:
@@ -74,26 +74,43 @@ def load_single_csv(file_path):
             return None # Bỏ qua các file lỗi kích thước
             
         data = df.to_numpy()
-        return data, label, subject_id
+        
+        # Trích xuất các cột gia tốc
+        ax = data[:, 0]
+        ay = data[:, 1]
+        az = data[:, 2]
+        
+        # Tính Pitch, Roll, SVM
+        pitch = np.arctan2(az, np.sqrt(ax**2 + ay**2)) * 180.0 / np.pi
+        roll = np.arctan2(ax, np.sqrt(ay**2 + az**2)) * 180.0 / np.pi
+        svm = np.sqrt(ax**2 + ay**2 + az**2)
+        
+        # Nối vào ma trận data
+        pitch = pitch.reshape(-1, 1)
+        roll = roll.reshape(-1, 1)
+        svm = svm.reshape(-1, 1)
+        
+        data_9f = np.concatenate((data, pitch, roll, svm), axis=1) # shape: (200, 9)
+        return data_9f, label, subject_id
     except Exception as e:
         return None
 
 def prepare_dataset():
     """Gộp dữ liệu từ các file CSV và chia tập Train/Val/Test (LSO)"""
-    train_cache_x = CACHE_DIR / 'X_train.npy'
-    train_cache_y = CACHE_DIR / 'y_train.npy'
+    train_cache_9f_x = CACHE_DIR / 'X_train.npy'
+    train_cache_9f_y = CACHE_DIR / 'y_train.npy'
     val_cache_x = CACHE_DIR / 'X_val.npy'
     val_cache_y = CACHE_DIR / 'y_val.npy'
     test_cache_x = CACHE_DIR / 'X_test.npy'
     test_cache_y = CACHE_DIR / 'y_test.npy'
     
     # Nếu đã có cache, load lên cho cực nhanh
-    if (train_cache_x.exists() and train_cache_y.exists() and 
+    if (train_cache_9f_x.exists() and train_cache_9f_y.exists() and 
         val_cache_x.exists() and val_cache_y.exists() and 
         test_cache_x.exists() and test_cache_y.exists()):
         print("[*] Phát hiện cache dữ liệu đã được gộp. Đang tải từ cache...")
-        X_train = np.load(train_cache_x)
-        y_train = np.load(train_cache_y)
+        X_train = np.load(train_cache_9f_x)
+        y_train = np.load(train_cache_9f_y)
         X_val = np.load(val_cache_x)
         y_val = np.load(val_cache_y)
         X_test = np.load(test_cache_x)
@@ -147,8 +164,8 @@ def prepare_dataset():
     
     # Lưu cache npy
     print("[*] Đang lưu cache dữ liệu để tái sử dụng ở các lần chạy sau...")
-    np.save(train_cache_x, X_train)
-    np.save(train_cache_y, y_train)
+    np.save(train_cache_9f_x, X_train)
+    np.save(train_cache_9f_y, y_train)
     np.save(val_cache_x, X_val)
     np.save(val_cache_y, y_val)
     np.save(test_cache_x, X_test)
@@ -157,29 +174,44 @@ def prepare_dataset():
     return X_train, y_train, X_val, y_val, X_test, y_test
 
 def build_model(input_shape):
-    """Xây dựng kiến trúc lai CNN-LSTM cho HAR (Đã giảm dung lượng và thêm Regularization)"""
-    model = Sequential([
-        Input(shape=input_shape),
-        
-        # 1. Trích xuất đặc trưng với L2 Regularization và Batch Norm
-        Conv1D(32, kernel_size=3, activation='relu', padding='same', 
-               kernel_regularizer=regularizers.l2(0.001)),
-        BatchNormalization(),
-        Conv1D(32, kernel_size=3, activation='relu', padding='same',
-               kernel_regularizer=regularizers.l2(0.001)),
-        BatchNormalization(),
-        MaxPooling1D(pool_size=2),
-        Dropout(0.3),
-        
-        # 2. LSTM được thu gọn và thêm L2
-        LSTM(64, return_sequences=True, kernel_regularizer=regularizers.l2(0.001)),
-        LSTM(32, kernel_regularizer=regularizers.l2(0.001)),
-        Dropout(0.4),
-        
-        # 3. Lớp đầu ra thu gọn
-        Dense(16, activation='relu', kernel_regularizer=regularizers.l2(0.001)),
-        Dense(4, activation='softmax')
-    ])
+    """Xây dựng kiến trúc Trunk-and-Branches (Late-Branching) cho HAR & Fall Detection"""
+    inputs = Input(shape=input_shape, name='input_layer')
+    
+    # =========================================================
+    # THÂN CÂY (TRUNK) - Lọc nhiễu và trích xuất đặc trưng chung
+    # =========================================================
+    x = Conv1D(32, kernel_size=3, activation='relu', padding='same', kernel_regularizer=regularizers.l2(0.001))(inputs)
+    x = BatchNormalization()(x)
+    x = Conv1D(32, kernel_size=3, activation='relu', padding='same', kernel_regularizer=regularizers.l2(0.001))(x)
+    x = BatchNormalization()(x)
+    x = MaxPooling1D(pool_size=2)(x)
+    x = Dropout(0.3)(x)
+    
+    # =========================================================
+    # NHÁNH 1: FALL EXPERT (Chuyên rình gai nhọn)
+    # =========================================================
+    # Rút trích đỉnh cao nhất từ các đặc trưng đã được làm sạch
+    fall_branch = GlobalMaxPooling1D()(x)
+    fall_branch = Dense(16, activation='relu', kernel_regularizer=regularizers.l2(0.001))(fall_branch)
+    
+    # =========================================================
+    # NHÁNH 2: HAR EXPERT (Chuyên đếm nhịp điệu Đi/Chạy)
+    # =========================================================
+    # Phân tích tính chuỗi thời gian của các đặc trưng đã làm sạch
+    har_branch = LSTM(64, return_sequences=True, kernel_regularizer=regularizers.l2(0.001))(x)
+    har_branch = LSTM(32, kernel_regularizer=regularizers.l2(0.001))(har_branch)
+    har_branch = Dropout(0.4)(har_branch)
+    har_branch = Dense(16, activation='relu', kernel_regularizer=regularizers.l2(0.001))(har_branch)
+    
+    # =========================================================
+    # HỢP NHẤT (Merge)
+    # =========================================================
+    merged = Concatenate()([fall_branch, har_branch])
+    merged = Dropout(0.3)(merged)
+    
+    outputs = Dense(4, activation='softmax', name='output_layer')(merged)
+    
+    model = Model(inputs=inputs, outputs=outputs)
     
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
@@ -193,6 +225,7 @@ def build_model(input_shape):
 def main():
     # 1. Load và chuẩn bị dữ liệu
     X_train, y_train, X_val, y_val, X_test, y_test = prepare_dataset()
+    print(f'[*] SHAPE thực tế của X_train: {X_train.shape}')
     
     # 2. Xử lý Class Imbalance
     # Tính trọng số class_weight tự động để bù đắp sự mất cân bằng dữ liệu
@@ -209,7 +242,7 @@ def main():
     model = build_model(input_shape)
     
     # 4. Thiết lập các Callbacks tối ưu huấn luyện
-    checkpoint_path = OUT_DIR / 'best_model_v4.keras'
+    checkpoint_path = OUT_DIR / 'best_model_v7.keras'
     callbacks = [
         # Dừng sớm nếu Validation Loss không giảm sau 15 epochs để tránh overfit
         EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True, verbose=1),
@@ -251,7 +284,7 @@ def main():
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig(OUT_DIR / 'training_history_v4.png')
+    plt.savefig(OUT_DIR / 'training_history_v7.png')
     plt.close()
     print("[*] Đã vẽ và lưu đồ thị lịch sử huấn luyện thành 'training_history.png'")
     
@@ -262,10 +295,12 @@ def main():
     y_pred_probs = best_model.predict(X_test, batch_size=256)
     y_pred = np.argmax(y_pred_probs, axis=1)
     
+    
     # Báo cáo kết quả
     report_str = "\n" + "="*50 + "\n"
     report_str += "BÁO CÁO PHÂN LOẠI TRÊN TẬP KIỂM THỬ (TEST SET)\n"
     report_str += "="*50 + "\n"
+    
     cls_report = classification_report(y_test, y_pred, target_names=CLASS_NAMES, digits=4)
     report_str += cls_report + "\n"
     
@@ -274,7 +309,7 @@ def main():
     # Tính Confusion Matrix
     cm = confusion_matrix(y_test, y_pred)
     
-    # Vẽ Confusion Matrix đẹp mắt bằng Matplotlib thuần túy
+    # Vẽ Confusion Matrix
     plt.figure(figsize=(8, 6))
     plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
     plt.title('Ma trận nhầm lẫn (Confusion Matrix) trên Test Set')
@@ -283,7 +318,6 @@ def main():
     plt.xticks(tick_marks, CLASS_NAMES, rotation=45)
     plt.yticks(tick_marks, CLASS_NAMES)
     
-    # Thêm chỉ số text vào từng ô
     thresh = cm.max() / 2.
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
@@ -294,13 +328,12 @@ def main():
     plt.ylabel('Nhãn Thực Tế (True Label)')
     plt.xlabel('Nhãn Dự Đoán (Predicted Label)')
     plt.tight_layout()
-    plt.savefig(OUT_DIR / 'confusion_matrix_v4.png')
+    plt.savefig(OUT_DIR / 'confusion_matrix_v7.png')
     plt.close()
-    print("[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v4.png'")
+    print("[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v7.png'")
     
-    report_str += "\n[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v4.png'\n"
+    report_str += "\n[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v7.png'\n"
     
-    # Kiểm tra chỉ số Recall của lớp Fall (nhãn 3)
     fall_idx = 3
     true_falls = np.sum(y_test == fall_idx)
     detected_falls = cm[fall_idx, fall_idx]
@@ -321,10 +354,9 @@ def main():
     print(eval_str)
     report_str += eval_str
     
-    # Ghi report ra file
     with open(OUT_DIR / 'report.txt', 'w', encoding='utf-8') as rf:
         rf.write(report_str)
-    print(f"[*] Đã lưu toàn bộ báo cáo vào {{OUT_DIR / 'report.txt'}}")
+    print(f"[*] Đã lưu toàn bộ báo cáo vào {OUT_DIR / 'report.txt'}")
 
 if __name__ == '__main__':
 

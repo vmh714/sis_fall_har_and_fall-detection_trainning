@@ -9,8 +9,8 @@ from sklearn.utils import class_weight
 from sklearn.metrics import classification_report, confusion_matrix
 
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, LSTM, Dense, Dropout, Input, BatchNormalization
+from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, GlobalMaxPooling1D, LSTM, Dense, Dropout, Input, BatchNormalization, Concatenate
 from tensorflow.keras import regularizers
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 
@@ -25,7 +25,7 @@ CURRENT_DIR = Path(r'c:\Users\hung.vumanh2\Documents\SisFall-PreProcessing')
 DATA_DIR = CURRENT_DIR / 'SisFall_dataset_Windowed'
 CACHE_DIR = CURRENT_DIR / 'train_cache'
 CACHE_DIR.mkdir(exist_ok=True)
-OUT_DIR = Path(r'c:\Users\hung.vumanh2\Documents\SisFall-PreProcessing\train_v4_kq')
+OUT_DIR = Path(r'c:\Users\hung.vumanh2\Documents\SisFall-PreProcessing\train_v5_kq')
 OUT_DIR.mkdir(exist_ok=True)
 
 # 1. Ánh xạ 34 nhãn gốc thành 4 lớp (Đã gộp)
@@ -157,29 +157,41 @@ def prepare_dataset():
     return X_train, y_train, X_val, y_val, X_test, y_test
 
 def build_model(input_shape):
-    """Xây dựng kiến trúc lai CNN-LSTM cho HAR (Đã giảm dung lượng và thêm Regularization)"""
-    model = Sequential([
-        Input(shape=input_shape),
-        
-        # 1. Trích xuất đặc trưng với L2 Regularization và Batch Norm
-        Conv1D(32, kernel_size=3, activation='relu', padding='same', 
-               kernel_regularizer=regularizers.l2(0.001)),
-        BatchNormalization(),
-        Conv1D(32, kernel_size=3, activation='relu', padding='same',
-               kernel_regularizer=regularizers.l2(0.001)),
-        BatchNormalization(),
-        MaxPooling1D(pool_size=2),
-        Dropout(0.3),
-        
-        # 2. LSTM được thu gọn và thêm L2
-        LSTM(64, return_sequences=True, kernel_regularizer=regularizers.l2(0.001)),
-        LSTM(32, kernel_regularizer=regularizers.l2(0.001)),
-        Dropout(0.4),
-        
-        # 3. Lớp đầu ra thu gọn
-        Dense(16, activation='relu', kernel_regularizer=regularizers.l2(0.001)),
-        Dense(4, activation='softmax')
-    ])
+    """Xây dựng kiến trúc Two-Stream (Phân nhánh) cho HAR & Fall Detection"""
+    inputs = Input(shape=input_shape, name='input_layer')
+    
+    # Lớp trích xuất chung (Nhẹ)
+    shared = Conv1D(16, kernel_size=3, activation='relu', padding='same')(inputs)
+    shared = BatchNormalization()(shared)
+    
+    # ---------------------------------------------------------
+    # NHÁNH 1: FALL EXPERT (Chuyên rình gai nhọn / thay đổi đột ngột)
+    # ---------------------------------------------------------
+    fall_branch = Conv1D(32, kernel_size=5, activation='relu', padding='same', kernel_regularizer=regularizers.l2(0.001))(shared)
+    fall_branch = BatchNormalization()(fall_branch)
+    # Global Max Pooling sẽ tóm lấy đúng cái gai gia tốc lớn nhất (Cú ngã) trong 2 giây
+    fall_branch = GlobalMaxPooling1D()(fall_branch)
+    fall_branch = Dropout(0.3)(fall_branch)
+    fall_branch = Dense(16, activation='relu', kernel_regularizer=regularizers.l2(0.001))(fall_branch)
+    
+    # ---------------------------------------------------------
+    # NHÁNH 2: HAR EXPERT (Chuyên đếm nhịp điệu Đi/Chạy)
+    # ---------------------------------------------------------
+    har_branch = MaxPooling1D(pool_size=2)(shared)
+    har_branch = LSTM(32, return_sequences=True, kernel_regularizer=regularizers.l2(0.001))(har_branch)
+    har_branch = LSTM(16, kernel_regularizer=regularizers.l2(0.001))(har_branch)
+    har_branch = Dropout(0.4)(har_branch)
+    har_branch = Dense(16, activation='relu', kernel_regularizer=regularizers.l2(0.001))(har_branch)
+    
+    # ---------------------------------------------------------
+    # HỢP NHẤT (Merge) - Dùng chung 1 Output cho C++ dễ đọc
+    # ---------------------------------------------------------
+    merged = Concatenate()([fall_branch, har_branch])
+    merged = Dropout(0.3)(merged)
+    
+    outputs = Dense(4, activation='softmax', name='output_layer')(merged)
+    
+    model = Model(inputs=inputs, outputs=outputs)
     
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
@@ -209,7 +221,7 @@ def main():
     model = build_model(input_shape)
     
     # 4. Thiết lập các Callbacks tối ưu huấn luyện
-    checkpoint_path = OUT_DIR / 'best_model_v4.keras'
+    checkpoint_path = OUT_DIR / 'best_model_v5.keras'
     callbacks = [
         # Dừng sớm nếu Validation Loss không giảm sau 15 epochs để tránh overfit
         EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True, verbose=1),
@@ -224,7 +236,7 @@ def main():
     history = model.fit(
         X_train, y_train,
         validation_data=(X_val, y_val),
-        epochs=50,
+        epochs=75,
         batch_size=256,
         class_weight=class_weights,
         callbacks=callbacks,
@@ -251,7 +263,7 @@ def main():
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig(OUT_DIR / 'training_history_v4.png')
+    plt.savefig(OUT_DIR / 'training_history_v5.png')
     plt.close()
     print("[*] Đã vẽ và lưu đồ thị lịch sử huấn luyện thành 'training_history.png'")
     
@@ -262,6 +274,7 @@ def main():
     y_pred_probs = best_model.predict(X_test, batch_size=256)
     y_pred = np.argmax(y_pred_probs, axis=1)
     
+    
     # Báo cáo kết quả
     report_str = "\n" + "="*50 + "\n"
     report_str += "BÁO CÁO PHÂN LOẠI TRÊN TẬP KIỂM THỬ (TEST SET)\n"
@@ -271,10 +284,12 @@ def main():
     
     print(report_str)
     
+    print(report_str)
+    
     # Tính Confusion Matrix
     cm = confusion_matrix(y_test, y_pred)
     
-    # Vẽ Confusion Matrix đẹp mắt bằng Matplotlib thuần túy
+    # Vẽ Confusion Matrix
     plt.figure(figsize=(8, 6))
     plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
     plt.title('Ma trận nhầm lẫn (Confusion Matrix) trên Test Set')
@@ -283,7 +298,6 @@ def main():
     plt.xticks(tick_marks, CLASS_NAMES, rotation=45)
     plt.yticks(tick_marks, CLASS_NAMES)
     
-    # Thêm chỉ số text vào từng ô
     thresh = cm.max() / 2.
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
@@ -294,13 +308,12 @@ def main():
     plt.ylabel('Nhãn Thực Tế (True Label)')
     plt.xlabel('Nhãn Dự Đoán (Predicted Label)')
     plt.tight_layout()
-    plt.savefig(OUT_DIR / 'confusion_matrix_v4.png')
+    plt.savefig(OUT_DIR / 'confusion_matrix_v5.png')
     plt.close()
-    print("[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v4.png'")
+    print("[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v5.png'")
     
     report_str += "\n[*] Đã vẽ và lưu ma trận nhầm lẫn thành 'confusion_matrix_v4.png'\n"
     
-    # Kiểm tra chỉ số Recall của lớp Fall (nhãn 3)
     fall_idx = 3
     true_falls = np.sum(y_test == fall_idx)
     detected_falls = cm[fall_idx, fall_idx]
@@ -321,10 +334,16 @@ def main():
     print(eval_str)
     report_str += eval_str
     
-    # Ghi report ra file
     with open(OUT_DIR / 'report.txt', 'w', encoding='utf-8') as rf:
         rf.write(report_str)
     print(f"[*] Đã lưu toàn bộ báo cáo vào {{OUT_DIR / 'report.txt'}}")
+
+    # Lưu biểu đồ kiến trúc mạng (yêu cầu pydot và graphviz, bỏ qua nếu lỗi)
+    try:
+        tf.keras.utils.plot_model(best_model, to_file=str(OUT_DIR / 'model_v5_architecture.png'), show_shapes=True, show_layer_names=True)
+        print("[*] Đã lưu sơ đồ mạng thành 'model_v5_architecture.png'")
+    except:
+        pass
 
 if __name__ == '__main__':
 
