@@ -51,3 +51,4 @@ test_int16.py
 .gitignore
 windowing_pipeline.py
 tool_for_new_dataset
+README.md*

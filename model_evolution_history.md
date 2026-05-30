@@ -53,5 +53,14 @@ Quá trình này bắt đầu từ khi chuyển sang sử dụng **Dataset mới
   * **Trans:** 85.5% (Tối ưu nhất có thể cho hành động fuzzing)
   * **Total Accuracy:** 91.56%
 
+## 6. Giai đoạn Tối ưu hóa Phần cứng Cấp thấp (v23)
+* **Vấn đề:** Các phiên bản trước (v21, v22) sử dụng `dilation_rate` để tăng Receptive Field. Khi chuyển sang TFLite, nó sinh ra các node `SPACE_TO_BATCH_ND` và `BATCH_TO_SPACE_ND`. Các node xáo trộn bộ nhớ này **không được thư viện SIMD (esp-nn) tối ưu hóa**, dẫn đến lãng phí xung nhịp CPU và làm thời gian inference (ngay cả bản INT8) vẫn ở mức ~286ms.
+* **Cải tiến (MCU-Optimized TCN):**
+  * **Loại bỏ Dilation:** Không dùng `dilation_rate` nữa.
+  * **Downsampling:** Đặt ngay một lớp `MaxPooling1D(pool_size=2)` ở đầu vào để giảm một nửa sequence (200 -> 100). Giảm 50% khối lượng tính toán.
+  * **Strided Convolution:** Dùng `strides=2` xen kẽ trong các block Conv1D để tăng nhanh Receptive Field mà không cần đệm số 0 (Zero-padding) hay xáo trộn không gian.
+  * **Padding Same:** Thay đổi từ `causal/valid + Cropping1D` thành `padding='same'` để tránh overhead từ việc gọt tensor (do bài toán dùng Window-based inference nên không vi phạm tính thời gian thực).
+* **Kết quả dự kiến:** Xóa sổ `SPACE_TO_BATCH_ND`, kích hoạt 100% sức mạnh SIMD, kéo thời gian inference INT8 xuống ngưỡng lý tưởng (< 100ms).
+
 ---
-**TỔNG KẾT:** Kiến trúc v22 là điểm giao thoa hoàn hảo giữa **Hiệu năng Toán học** và **Giới hạn Phần cứng (TinyML)**. Sẵn sàng 100% để biên dịch qua C++ (TFLite Micro) và nạp lên ESP32-S3.
+**TỔNG KẾT:** Kiến trúc v23 là phiên bản đột phá về mặt phần cứng, giải quyết triệt để vấn đề nghẽn cổ chai bộ nhớ trên vi điều khiển, đưa hệ thống vào trạng thái hoàn thiện nhất để chạy thực tế trên ESP32-S3.
