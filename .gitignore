@@ -29,7 +29,7 @@ saved_model/
 
 # 5. Các file chuyển đổi cũ (TFLite, C++)
 *.tflite
-# model_data.cc
+model_data.cc
 # model_data.h
 
 # 6. Hình ảnh và biểu đồ (Plots)
