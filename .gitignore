@@ -18,8 +18,7 @@ archive.zip
 *.rar
 
 # 3. Cache lúc Train
-train_cache/
-train_cache_9f/
+train_cache_*/
 
 # 4. Các Model đã Train
 *.keras
@@ -30,8 +29,8 @@ saved_model/
 
 # 5. Các file chuyển đổi cũ (TFLite, C++)
 *.tflite
-model_data.cc
-model_data.h
+# model_data.cc
+# model_data.h
 
 # 6. Hình ảnh và biểu đồ (Plots)
 # *.png
@@ -49,3 +48,6 @@ sis_fall_firmware_inference/managed_components/
 
 test_int8.py
 test_int16.py
+.gitignore
+windowing_pipeline.py
+tool_for_new_dataset

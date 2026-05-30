@@ -1,0 +1,23 @@
+
+==================================================
+BÁO CÁO PHÂN LOẠI TRÊN TẬP KIỂM THỬ (TEST SET) - TCN v14 (Threshold 0.25)
+==================================================
+              precision    recall  f1-score   support
+
+        Walk     0.8897    0.8511    0.8700      2256
+         Run     0.9750    0.9714    0.9732      1085
+  Static/ADL     0.9193    0.9374    0.9283      4025
+        Fall     0.9483    0.9773    0.9626       750
+
+    accuracy                         0.9216      8116
+   macro avg     0.9331    0.9343    0.9335      8116
+weighted avg     0.9212    0.9216    0.9212      8116
+
+
+==================================================
+KẾT QUẢ ĐÁNH GIÁ CHUYÊN BIỆT LỚP TÉ NGÃ (FALL):
+  - Số ca ngã thực tế trong tập Test: 750
+  - Số ca ngã mô hình phát hiện đúng: 733
+  - TỶ LỆ RECALL PHÁT HIỆN TÉ NGÃ:    97.73%
+  => ĐẠT TIÊU CHUẨN! (Recall >= 95%)
+==================================================

@@ -1,0 +1,63 @@
+NHẮC NHỞ QUAN TRỌNG KHI DEPLOY MÔ HÌNH TCN v14 LÊN VI ĐIỀU KHIỂN (ESP32/MCU - C/C++)
+
+Mô hình v14 đã được khôi phục kiến trúc chuẩn v12 (sử dụng GlobalAveragePooling1D, không Label Smoothing), kết hợp tăng trọng số huấn luyện lớp Walk (x1.3) và Fall (x3.0) cùng việc sử dụng ngưỡng xác định Fall đặc biệt (0.25) để tối đa hóa Recall.
+
+Để đạt hiệu quả thực tế cao nhất trên thiết bị đeo (Wearable Device) và giải quyết triệt để sự nhập nhằng giữa đi bộ (Walk) và đứng yên (Static), bắt buộc phải tích hợp các quy tắc hậu xử lý (Post-processing) bằng C/C++ dưới đây trên MCU:
+
+1. DANH SÁCH CHỈ SỐ LỚP (CLASS INDEX MAP)
+   - Chỉ số 0: Walk (Đi bộ)
+   - Chỉ số 1: Run (Chạy)
+   - Chỉ số 2: Static/ADL (Đứng yên / Hoạt động thường ngày nhẹ)
+   - Chỉ số 3: Fall (Té ngã)
+
+2. ÁP DỤNG NGƯỠNG LỌC FALL 0.25 (THRESHOLDING TRÊN MCU)
+   Sau khi mô hình TFLite Micro thực hiện xong Inference, kết xuất ra mảng xác suất 4 phần tử `prob[4]` từ lớp Softmax (nếu chạy INT8, hãy đảm bảo đã dequantize giá trị đầu ra về float [0.0 - 1.0]):
+   
+   Quy tắc phân loại ưu tiên Fall cực kỳ quan trọng:
+   ```cpp
+   int final_class = -1;
+   
+   // BƯỚC 1: Kiểm tra ngưỡng nhạy cảm cho lớp Fall (Chỉ số 3) trước tiên
+   if (prob[3] >= 0.25f) {
+       final_class = 3; // Kích hoạt khẩn cấp trạng thái Té ngã
+   } else {
+       // BƯỚC 2: Nếu xác suất ngã dưới 25%, tìm lớp có xác suất cao nhất trong 3 lớp còn lại
+       float max_val = prob[0];
+       final_class = 0; // Mặc định là Walk
+       for (int i = 1; i < 3; i++) {
+           if (prob[i] > max_val) {
+               max_val = prob[i];
+               final_class = i;
+           }
+       }
+   }
+   ```
+
+3. KỸ THUẬT LỌC BỘ ĐỆM XOAY VÒNG SONG SONG (DOUBLE-TRACK POST-PROCESSING)
+   Để triệt tiêu tình trạng nhiễu nhấp nháy giữa Walk và Static nhưng vẫn đảm bảo tính phản hồi tức thì khi có tai nạn, ta áp dụng mô hình xử lý hai luồng riêng biệt:
+
+   ■ LUỒNG 1: XỬ LÝ KHẨN CẤP (Lớp 3 - Fall)
+   - Tính chất: Té ngã diễn ra rất nhanh và nguy hiểm. KHÔNG ĐƯỢC áp dụng bộ bầu chọn số đông cứng nhắc đối với lớp này, vì nó sẽ làm trễ hoặc nuốt mất cảnh báo ngã.
+   - Giải pháp: Ngay khi `final_class == 3` ở bất kỳ chu kỳ đơn lẻ nào, lập tức kích hoạt "CẢNH BÁO TIỀN TÉ NGÃ" (Pre-alarm).
+   - Gợi ý UI/UX: Thiết bị có thể rung mạnh hoặc phát âm báo nhỏ trong vòng 10-15 giây để người đeo bấm nút hủy nếu là báo giả (False Positive), trước khi tự động phát tín hiệu cấp cứu qua BLE/Wi-Fi/LoRa.
+
+   ■ LUỒNG 2: XỬ LÝ HÀNH VI LIÊN TỤC (Lớp 0, 1, 2 - Walk, Run, Static)
+   - Tính chất: Hành động đi bộ, chạy hay đứng yên có xu hướng kéo dài liên tục. Việc nhầm lẫn 1-2 khung hình lẻ tẻ là do nhiễu cảm biến tạm thời.
+   - Giải pháp: Bầu chọn số đông (Majority Vote) bằng Bộ đệm xoay vòng (Circular Buffer) kích thước N = 5 (hoặc N = 3 tùy độ trễ mong muốn).
+   
+   Cách hoạt động trên MCU:
+   1. Khai báo một hàng đợi xoay vòng chứa 5 kết quả gần nhất: `int history_buffer[5] = {2, 2, 2, 2, 2};` (Khởi tạo mặc định là Static/ADL).
+   2. Khi nhận được kết quả `final_class` mới mà khác `3` (không phải ngã):
+      - Đẩy `final_class` mới vào hàng đợi, loại bỏ phần tử cũ nhất.
+      - Duyệt hàng đợi để đếm tần suất xuất hiện của từng lớp (0, 1, 2).
+      - Lớp nào chiếm đa số (tối thiểu 3/5 phiếu hoặc nhiều phiếu nhất) sẽ được chọn làm trạng thái hiển thị chính thức của thiết bị.
+   
+   Ví dụ minh họa:
+   - Kết quả dự đoán thô liên tiếp: `[Walk, Walk, Static/ADL, Walk, Walk]`
+   - Nếu không lọc: Trạng thái hiển thị bị giật cục, chuyển sang Static rồi quay lại Walk rất kém chuyên nghiệp.
+   - Sau khi lọc Majority Vote: Trạng thái chốt vẫn là WALK (4 phiếu Walk vs 1 phiếu Static/ADL).
+
+4. LƯU Ý KHI THU THẬP TÍN HIỆU CẢM BIẾN (IMU)
+   - Tần số trích xuất mẫu (Sampling Rate) từ cảm biến IMU trên firmware phải trùng khớp tuyệt đối với tần số huấn luyện trong `windowing_pipeline.py` (ví dụ: 100Hz).
+   - Cửa sổ dữ liệu đầu vào: 200 bước thời gian (timesteps) x 6 trục dữ liệu (Acc X/Y/Z, Gyro X/Y/Z).
+   - Tần suất chạy mô hình (Overlap): Nếu cấu hình overlap 50% (tức dịch chuyển 100 mẫu mới), MCU sẽ chạy mô hình inference sau mỗi 1.0 giây (ở tần số 100Hz). Điều này mang lại sự cân bằng hoàn hảo giữa thời gian đáp ứng hệ thống (trễ hiển thị tối đa 3-5 giây do Majority Vote) và thời lượng pin thiết bị.

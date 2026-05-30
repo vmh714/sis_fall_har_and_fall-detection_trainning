@@ -1,0 +1,39 @@
+DANH SÁCH CÁC HÀNH ĐỘNG CẦN TỰ THU THẬP (CUSTOM DATASET)
+
+==================================================
+1. NHÓM ADL (SINH HOẠT HÀNG NGÀY) - MUST & SHOULD DO
+==================================================
+Tập trung vào các hành động cốt lõi nhất, bỏ qua các tình huống viền (edge cases).
+
+[ ] D01: Đi bộ bình thường (Walking slowly) - Hãy thu nhiều, dạo quanh nhà.
+[ ] D02: Đi bộ nhanh (Walking quickly) - Đi nhanh, dứt khoát.
+[ ] D03: Chạy bộ nhẹ (Jogging slowly) - Nếu có theo dõi thể thao.
+[ ] D04: Chạy bộ nhanh (Jogging quickly) - Chạy tốc độ cao hơn, dứt khoát.
+[ ] D05: Lên / Xuống cầu thang (Walking upstairs and downstairs) - Rất quan trọng, thu cả chiều lên và chiều xuống.
+[ ] D07: Ngồi xuống ghế và từ từ đứng lên (Sit in a chair and up slowly) - Dùng ghế sofa, ghế ăn, ghế làm việc.
+[ ] D08: Ngồi xuống ghế và đứng lên nhanh (Quickly sit in a chair and up)
+[ ] D12: Từ từ nằm xuống giường và ngồi dậy (Lying slowly and sit again)
+[ ] D15: Đứng thẳng, cúi gập người (giả vờ nhặt đồ) và đứng lên (Bending and getting up) - Giúp mô hình không nhầm với ngã gập người.
+[ ] D_Idle: Trạng thái Tĩnh (Pure Static / Idle Postures) - NÊN THU THẬP RIÊNG. Đeo cảm biến và giữ im tư thế đứng yên, ngồi yên trên ghế, nằm yên trên giường (mỗi tư thế 1-2 phút liên tục). Cực kỳ hữu ích để làm mẫu âm tính chuẩn, chống nhiễu/báo động giả khi người dùng không hoạt động lâu dài.
+
+* Ghi chú: Các hành động D11 (quỵ ngã), D13 (nằm phịch), D17 (lên xuống xe), D18 (vấp), D19 (nhảy) quá phức tạp để tự diễn tự nhiên. Ta sẽ bỏ qua và kế thừa data từ SisFall.
+
+==================================================
+2. NHÓM FALL (TÉ NGÃ) - BASIC CALIBRATION
+==================================================
+Mục đích: Giúp mô hình quen với dải đo (range) và độ nhiễu (noise) của cảm biến vật lý mà bạn đang dùng. 
+BẮT BUỘC NGÃ LÊN NỆM DÀY / ĐỆM XỐP để an toàn.
+
+[ ] F01: Ngã chúi về phía trước (Fall forward)
+[ ] F02: Ngã ngửa về phía sau (Fall backward)
+[ ] F03: Ngã nghiêng sập sang bên (Lateral fall)
+
+* Ghi chú: Các tình huống ngã khó (ngã khi đang chạy, ngã đập tay xuống bàn, ngã quỵ, ngã khi cố đứng lên) sẽ kế thừa 100% từ SisFall.
+
+==================================================
+LƯU Ý KHI THU THẬP
+==================================================
+1. Đứng yên (hoặc ngồi yên) 1-2 giây trước khi bắt đầu cử động.
+2. Giữ nguyên tư thế 1-2 giây sau khi kết thúc hành động.
+=> Việc này giúp cửa sổ trượt (sliding window) quét qua và bắt trọn được toàn bộ sóng đỉnh (peak) của hành động mà không bị cắt vỡ.
+3. Cố định cảm biến: Phải đeo cảm biến (bằng đai thắt lưng hoặc gá nhựa) thật chặt vào người. Nếu module bị lỏng và đập lạch cạch vào người, data sẽ rác hoàn toàn.

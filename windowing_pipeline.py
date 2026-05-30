@@ -36,6 +36,43 @@ def extract_adl_windows(df, window_size=200, step_size=100):
         windows.append(df.iloc[start:start + window_size])
     return windows
 
+def remove_odd_adl_windows():
+    current_dir = Path(__file__).parent
+    # Hỗ trợ cả tên thư mục cũ và mới
+    windowed_dir = current_dir / 'SisFall_dataset_Windowed'
+    if not windowed_dir.exists():
+        windowed_dir = current_dir / 'SisFall_dataset_Window'
+        
+    if not windowed_dir.exists():
+        print(f"Không tìm thấy thư mục {windowed_dir}")
+        return
+        
+    all_files = list(windowed_dir.rglob('*.csv'))
+    total_files = len(all_files)
+    removed = 0
+    
+    print(f"[*] Đang quét {total_files} file trong {windowed_dir.name} để xóa các window lẻ...")
+    
+    for file_path in all_files:
+        filename = file_path.stem
+        is_fall = filename.startswith('F')
+        
+        # Chỉ xử lý các file không phải là ngã (ADL)
+        if not is_fall:
+            try:
+                # Cắt chuỗi để lấy số W (ví dụ từ D01_SA01_R01_W001 lấy ra 1)
+                w_idx_str = filename.split('_W')[-1]
+                w_idx = int(w_idx_str)
+                
+                # Nếu là số lẻ (1, 3, 5...) thì xóa file
+                if w_idx % 2 != 0:
+                    file_path.unlink()
+                    removed += 1
+            except Exception as e:
+                pass
+                
+    print(f"[*] Hoàn tất! Đã xóa thành công {removed} file ADL có số window lẻ.")
+
 def process_all_windows():
     current_dir = Path(__file__).parent
     input_dir = current_dir / 'SisFall_dataset_Processed'
@@ -65,9 +102,13 @@ def process_all_windows():
             if is_fall:
                 windows = extract_fall_windows(df)
             else:
-                windows = extract_adl_windows(df)
+                windows = extract_adl_windows(df, step_size=50)
                 
             for w_idx, win_df in enumerate(windows):
+                # Lọc bỏ các window số chẵn của dữ liệu không phải Fall
+                if not is_fall and w_idx % 2 == 0:
+                    continue
+                    
                 # Lưu định dạng giống gốc: F01_SA01_R01_W000.csv
                 out_name = out_file_dir / f"{filename}_W{w_idx:03d}.csv"
                 if not out_name.exists():
@@ -89,4 +130,5 @@ if __name__ == '__main__':
         sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
         sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
         
-    process_all_windows()
+    # Thay vì process_all_windows() (tạo mới), bây giờ ta gọi hàm xóa file lẻ trực tiếp trong folder đã có
+    remove_odd_adl_windows()
