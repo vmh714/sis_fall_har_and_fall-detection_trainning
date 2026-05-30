@@ -1,21 +1,37 @@
 import tensorflow as tf
 import os
 import sys
+import numpy as np
 
 # Disable mixed precision just in case
 tf.keras.backend.set_floatx('float32')
 
-model_path = '/home/linh_linh/dataset/sis_fall_har_and_fall-detection_trainning/train_v21_kq/best_model_v21.keras'
-tflite_path = '/home/linh_linh/dataset/sis_fall_har_and_fall-detection_trainning/sis_fall_firmware_inference/main/model_v21_float32.tflite'
-cc_path = '/home/linh_linh/dataset/sis_fall_har_and_fall-detection_trainning/sis_fall_firmware_inference/main/model_data.cc'
-h_path = '/home/linh_linh/dataset/sis_fall_har_and_fall-detection_trainning/sis_fall_firmware_inference/main/model_data.h'
+ROOT_DIR = '/home/linh_linh/dataset/sis_fall_har_and_fall-detection_trainning'
+model_path = os.path.join(ROOT_DIR, 'train_v21_kq', 'best_model_v21.keras')
+tflite_path = os.path.join(ROOT_DIR, 'model_v21_int8.tflite')
+cc_path = os.path.join(ROOT_DIR, 'model_data_v21.cc')
+h_path = os.path.join(ROOT_DIR, 'model_data_v21.h')
 
 print(f"[*] Loading Keras model from: {model_path}")
 model = tf.keras.models.load_model(model_path)
 
-print("[*] Converting to TFLite (Float32)...")
+# Load representative dataset for quantization
+print("[*] Loading representative dataset for INT8 Quantization...")
+cache_file = os.path.join(ROOT_DIR, 'train_cache_v18_v19_idle_trans', 'X_train.npy')
+X_train = np.load(cache_file)
+# Use 100 samples for calibration
+def representative_data_gen():
+    for i in range(100):
+        yield [X_train[i:i+1].astype(np.float32)]
+
+print("[*] Converting to TFLite (INT8 Quantization)...")
 converter = tf.lite.TFLiteConverter.from_keras_model(model)
-# Optimize for size/latency if needed, but keeping default Float32 for ESP32-S3 FPU compatibility
+converter.optimizations = [tf.lite.Optimize.DEFAULT]
+converter.representative_dataset = representative_data_gen
+converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+converter.inference_input_type = tf.int8
+converter.inference_output_type = tf.int8
+
 tflite_model = converter.convert()
 
 with open(tflite_path, 'wb') as f:
@@ -32,10 +48,10 @@ for i, h in enumerate(hex_array):
 
 cc_content = f"""#include "model_data.h"
 
-// TCN v21 Model for Fall Detection (Float32)
+// TCN v21 Model for Fall Detection (INT8 Quantized)
 // Architecture: Kernel=5, Dilation=[1,2,4,8]x2, GAP+GMP, 5 Classes
-// Input: (200, 6)
-// Output: (5) -> Walk, Run, Idle, Trans, Fall
+// Input: (200, 6) INT8
+// Output: (5) INT8 -> Walk, Run, Idle, Trans, Fall
 const unsigned char g_model_data[] = {{
   {formatted_hex.strip(', ')}
 }};

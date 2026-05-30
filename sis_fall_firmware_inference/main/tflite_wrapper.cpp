@@ -117,7 +117,7 @@ int tflite_init(void) {
     // In ra lượng RAM thực tế yêu cầu
     ESP_LOGI(TAG, "================================================");
     ESP_LOGI(TAG, "TFLITE ARENA CALCULATION RESULTS:");
-    ESP_LOGI(TAG, "Total Arena Size Configured: %d bytes (PSRAM)", kTensorArenaSize);
+    ESP_LOGI(TAG, "Total Arena Size Configured: %d bytes (SRAM)", kTensorArenaSize);
     ESP_LOGI(TAG, "Actual Arena Used: %d bytes", (int)interpreter->arena_used_bytes());
     ESP_LOGI(TAG, "================================================");
 
