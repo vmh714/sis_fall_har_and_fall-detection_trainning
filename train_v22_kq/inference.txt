@@ -1,0 +1,11 @@
+I (1177) TFLiteWrapper: ================================================
+I (1177) TFLiteWrapper: TFLITE ARENA CALCULATION RESULTS:
+I (1177) TFLiteWrapper: Total Arena Size Configured: 153600 bytes (SRAM)
+I (1187) TFLiteWrapper: Actual Arena Used: 97600 bytes
+I (1197) TFLiteWrapper: ================================================
+I (1197) TFLiteWrapper: Model initialized successfully!
+I (1207) TFLiteWrapper: Input shape: [1, 200, 6]
+I (1697) TFLiteWrapper: ================================================
+I (1697) TFLiteWrapper: INFERENCE PERFORMANCE:
+I (1697) TFLiteWrapper: Inference Time: 487980 microseconds (487.98 ms)
+I (1707) TFLiteWrapper: ================================================

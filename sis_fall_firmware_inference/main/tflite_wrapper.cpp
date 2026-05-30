@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h" // Thêm thư viện để cấp phát PSRAM
 
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -13,23 +14,32 @@
 
 static const char* TAG = "TFLiteWrapper";
 
-// Globals, used for compatibility with Arduino-style sketches.
 namespace {
     const tflite::Model* model = nullptr;
     tflite::MicroInterpreter* interpreter = nullptr;
     TfLiteTensor* input = nullptr;
     TfLiteTensor* output = nullptr;
 
-    // Kích thước Tensor Arena giả định (200KB) để an toàn cho mô hình Float32
-    // Sau khi chạy xong, hàm interpreter->arena_used_bytes() sẽ trả về số thực tế
-    constexpr int kTensorArenaSize = 200 * 1024;
+    // Tăng kích thước lên 1MB
+    constexpr int kTensorArenaSize = 150 * 1024;
+    
     uint8_t tensor_arena[kTensorArenaSize];
+    // Đổi từ mảng tĩnh sang con trỏ để cấp phát động
+    //uint8_t* tensor_arena = nullptr;
 }  // namespace
 
 int tflite_init(void) {
     tflite::InitializeTarget();
 
-    // Map the model into a usable data structure.
+    // 1. Cấp phát Tensor Arena vào PSRAM
+    // tensor_arena = (uint8_t*)heap_caps_malloc(kTensorArenaSize, MALLOC_CAP_SPIRAM);
+    // if (tensor_arena == nullptr) {
+    //     ESP_LOGE(TAG, "Lỗi: Không thể cấp phát %d bytes trên PSRAM!", kTensorArenaSize);
+    //     return -1;
+    // }
+    // ESP_LOGI(TAG, "Đã cấp phát thành công %d bytes trên PSRAM.", kTensorArenaSize);
+
+    // 2. Load mô hình
     model = tflite::GetModel(g_model_data);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
         ESP_LOGE(TAG, "Model provided is schema version %d not equal to supported version %d.",
@@ -37,8 +47,8 @@ int tflite_init(void) {
         return -1;
     }
 
-    // Đăng ký các toán tử cần thiết cho mô hình
-    static tflite::MicroMutableOpResolver<60> resolver;
+    // 3. Đăng ký các toán tử
+    static tflite::MicroMutableOpResolver<65> resolver;
     resolver.AddConv2D();
     resolver.AddMaxPool2D();
     resolver.AddReshape();
@@ -72,8 +82,8 @@ int tflite_init(void) {
     resolver.AddTranspose();
     resolver.AddSqueeze();
     resolver.AddUnpack();
-    resolver.AddLogistic(); // Sigmoid cho LSTM
-    resolver.AddTanh();     // Tanh cho LSTM
+    resolver.AddLogistic(); 
+    resolver.AddTanh();     
     resolver.AddSub();
     resolver.AddExp();
     resolver.AddSquare();
@@ -89,27 +99,28 @@ int tflite_init(void) {
     resolver.AddReduceMin();
     resolver.AddCast();
     resolver.AddExpandDims();
+    resolver.AddSpaceToBatchNd();
+    resolver.AddBatchToSpaceNd();
 
-    // Build an interpreter to run the model with.
+    // 4. Build Interpreter
     static tflite::MicroInterpreter static_interpreter(
         model, resolver, tensor_arena, kTensorArenaSize);
     interpreter = &static_interpreter;
 
-    // Allocate memory from the tensor_arena for the model's tensors.
+    // 5. Cấp phát Tensor vào vùng nhớ đã tạo
     TfLiteStatus allocate_status = interpreter->AllocateTensors();
     if (allocate_status != kTfLiteOk) {
         ESP_LOGE(TAG, "AllocateTensors() failed");
         return -1;
     }
 
-    // In ra lượng RAM thực tế yêu cầu để cấp phát cho mô hình!
+    // In ra lượng RAM thực tế yêu cầu
     ESP_LOGI(TAG, "================================================");
     ESP_LOGI(TAG, "TFLITE ARENA CALCULATION RESULTS:");
-    ESP_LOGI(TAG, "Total Arena Size Configured: %d bytes", kTensorArenaSize);
+    ESP_LOGI(TAG, "Total Arena Size Configured: %d bytes (PSRAM)", kTensorArenaSize);
     ESP_LOGI(TAG, "Actual Arena Used: %d bytes", (int)interpreter->arena_used_bytes());
     ESP_LOGI(TAG, "================================================");
 
-    // Obtain pointers to the model's input and output tensors.
     input = interpreter->input(0);
     output = interpreter->output(0);
     
@@ -124,24 +135,18 @@ void tflite_run_inference(void) {
         return;
     }
 
-    // Tạo dữ liệu giả định (ví dụ: gán bằng 0.0)
-    // Đối với mô hình int8, input type sẽ là kTfLiteInt8
-    // Đối với mô hình float32, input type sẽ là kTfLiteFloat32
     if (input->type == kTfLiteFloat32) {
         for (int i = 0; i < input->bytes / sizeof(float); ++i) {
             input->data.f[i] = 0.0f;
         }
     } else if (input->type == kTfLiteInt8) {
         for (int i = 0; i < input->bytes; ++i) {
-            input->data.int8[i] = 0; // Giá trị tương đương 0.0 sau khi quantize (phụ thuộc vào zero_point)
+            input->data.int8[i] = 0; 
         }
     }
 
-    // Bấm giờ Inference
     int64_t start_time = esp_timer_get_time();
-    
     TfLiteStatus invoke_status = interpreter->Invoke();
-    
     int64_t end_time = esp_timer_get_time();
     int64_t inference_time_us = end_time - start_time;
 
