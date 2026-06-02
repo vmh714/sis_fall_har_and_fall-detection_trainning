@@ -9,10 +9,10 @@ tf.keras.backend.set_floatx('float32')
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(CURRENT_DIR)
 
-model_path = os.path.join(CURRENT_DIR, 'best_model_v23.keras')
-tflite_path = os.path.join(CURRENT_DIR, 'model_v23_int8.tflite')
-cc_path = os.path.join(CURRENT_DIR, 'model_data_v23.cc')
-h_path = os.path.join(CURRENT_DIR, 'model_data_v23.h')
+model_path = os.path.join(CURRENT_DIR, 'best_model_v24.keras')
+tflite_path = os.path.join(CURRENT_DIR, 'model_v24_int8.tflite')
+cc_path = os.path.join(CURRENT_DIR, 'model_data_v24.cc')
+h_path = os.path.join(CURRENT_DIR, 'model_data_v24.h')
 
 print(f"[*] Loading Keras model from: {model_path}")
 model = tf.keras.models.load_model(model_path)
@@ -62,7 +62,7 @@ for i, h in enumerate(hex_array):
 
 cc_content = f"""#include "model_data.h"
 
-// TCN v23 Model for Fall Detection (INT8 Quantized - Strides + Pooling, NO DILATION)
+// TCN v24 Model for Fall Detection (INT8 Quantized - Strides + Pooling, NO DILATION)
 // Architecture: MaxPooling1D(2) -> 4x(Conv1D(k=7) + SE Block), GAP+GMP, 5 Classes
 // Input: (200, 6) INT8
 // Output: (5) INT8 -> Walk, Run, Idle, Trans, Fall
