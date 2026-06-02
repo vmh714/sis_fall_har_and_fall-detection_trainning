@@ -1,6 +1,8 @@
 #ifndef TFLITE_WRAPPER_H
 #define TFLITE_WRAPPER_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -11,6 +13,10 @@ int tflite_init(void);
 
 // Thực thi mô hình với dữ liệu giả định và đo thời gian
 void tflite_run_inference(void);
+
+// Hàm phụ trợ cho dữ liệu thực tế
+int get_input_bytes(void);
+void tflite_run_inference_with_data(float* data, size_t num_bytes);
 
 #ifdef __cplusplus
 }

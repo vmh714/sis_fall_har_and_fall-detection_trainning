@@ -1,0 +1,23 @@
+
+==================================================
+BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - TCN v23 (5 Lớp)
+Dựa trên file: D:\New folder\sis_fall_har_and_fall-detection_trainning\inference_results.csv
+==================================================
+              precision    recall  f1-score   support
+
+        Walk     1.0000    0.0100    0.0198       100
+         Run     1.0000    0.5100    0.6755       100
+        Idle     0.6706    0.8550    0.7516       200
+       Trans     0.4221    0.6500    0.5118       100
+        Fall     0.6978    0.9700    0.8117       100
+
+    accuracy                         0.6417       600
+   macro avg     0.7581    0.5990    0.5541       600
+weighted avg     0.7435    0.6417    0.5870       600
+
+==================================================
+KẾT QUẢ ĐÁNH GIÁ CHUYÊN BIỆT LỚP TÉ NGÃ (FALL) TRÊN FIRMWARE:
+  - Số ca ngã thực tế: 100
+  - Số ca ngã phát hiện đúng: 97
+  - TỶ LỆ RECALL TÉ NGÃ (FIRMWARE): 97.00%
+==================================================
