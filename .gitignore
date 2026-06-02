@@ -21,7 +21,7 @@ archive.zip
 train_cache_*/
 
 # 4. Các Model đã Train
-*.keras
+# *.keras
 *.h5
 *.hdf5
 *.pb
