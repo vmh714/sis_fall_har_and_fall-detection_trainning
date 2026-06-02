@@ -47,16 +47,31 @@ Mục tiêu tối thượng là đạt Recall > 95% cho lớp Fall (tiêu chuẩ
 
 ---
 
-## 3. Chiến Lược Triển Khai Thực Tế (MCU / C++)
+## 3. 🚨 Plot Twist Định Mệnh: Khủng Hoảng "Per-Tensor Quantization" Trên Firmware
 
-Dựa trên chuỗi thực nghiệm toàn diện với tập dữ liệu chuẩn 9 kênh (Không la bàn), chúng ta thống nhất hệ thống phần mềm nhúng để cài đặt lên thiết bị đeo (Wearable) như sau:
+Mặc dù mô hình v14/v23 Float32 trên Keras cho kết quả vượt trội, nhưng khi ép kiểu xuống INT8 (Quantization) để nạp vào Firmware ESP32, độ chính xác bất ngờ **tuột dốc không phanh** (Lớp Walk và Run gần như "tê liệt", mô hình mù quáng dự đoán sai sang Fall/Idle).
+
+**Nguyên nhân cốt lõi (Lỗi kinh điển trong Edge AI):**
+- Theo đặc tả phần cứng (`Readme.txt`), gia tốc kế (ADXL345) có dải đo `±16g` nhưng biên độ thực tế của bộ dữ liệu chủ yếu dao động cực hẹp **`[-1.6 : 0.4]`**. Ngược lại, con quay hồi chuyển (ITG3200) có dải đo khổng lồ `±2000°/s`, biên độ ghi nhận tới **`[-65 : 65]`**.
+- Khi TensorFlow Lite nén mô hình sang INT8, lớp dữ liệu đầu vào (Input Tensor) bắt buộc phải dùng cơ chế **Per-Tensor Quantization** (Nghĩa là dùng chung 1 hệ số chia Scale cho TOÀN BỘ 6 trục).
+- Do dải phân bố của Gyro quá lớn (`[-65 : 65]`), TFLite quét và tính toán ra bước nhảy (Resolution) cho số nguyên INT8 là `~0.5` cho mỗi bậc. Với bước nhảy này, toàn bộ dải tín hiệu gia tốc vi mô của các hành động bước đi (vốn chỉ dao động `0.1` đến `0.4`) lập tức bị chia tỷ lệ và làm tròn tịt ngòi về **`0`**. Mô hình trên vi điều khiển bị "mù" hoàn toàn cảm biến gia tốc, mất phương hướng và dẫn đến việc phân loại sai trầm trọng.
+
+**Giải Pháp Vàng (Global Min-Max Scaling):**
+- Áp dụng chuẩn hóa vĩ mô bằng cách **chia dữ liệu thô cho hệ số đo tối đa (Max Range) của chính IMU** ngay từ bước tiền xử lý (Pre-processing) trước khi đưa vào Keras. (Ví dụ: `Accel / 2.0` và `Gyro / 250.0`).
+- Phương pháp này mang cả 6 trục về chung một hệ quy chiếu biên độ `[-1.0 : 1.0]`. Nhờ đó, hệ số Scale của INT8 được nén xuống cực kỳ mịn (chỉ `~0.0078`). Toàn bộ những đường cong tinh tế của tín hiệu gia tốc kế được bảo toàn nguyên vẹn 100%, cứu sống hoàn toàn độ chính xác của mô hình trên phần cứng nhúng!
+
+---
+
+## 4. Chiến Lược Triển Khai Thực Tế (MCU / C++)
+
+Dựa trên chuỗi thực nghiệm toàn diện với tập dữ liệu chuẩn 9 kênh (Không la bàn) và khắc phục thành công yếu điểm Quantization, chúng ta thống nhất hệ thống phần mềm nhúng để cài đặt lên thiết bị đeo (Wearable) như sau:
 
 > [!IMPORTANT]  
-> **Chốt sổ Kiến trúc & Trọng số:** Sử dụng cấu hình và tệp trọng số `.keras` / `.tflite` của phiên bản **v14**. Ngôi vương đã đổi chủ từ v12 (dataset cũ) sang v14 (dataset 9 kênh chuẩn).
+> **Chốt sổ Kiến trúc & Trọng số:** Sử dụng cấu hình và tệp trọng số `.keras` / `.tflite` của phiên bản **v14/v23**. Đảm bảo dữ liệu đã được chia theo tỷ lệ vĩ mô (Max Range Scaling) trước khi Inference.
 
 > [!TIP]  
 > **Kỹ Thuật Hậu Xử Lý (Post-Processing) Bắt Buộc:**
 > 
-> 1. **Luồng Khẩn Cấp (Fall):** Theo dõi xác suất từ đầu ra mô hình liên tục. Ngay khi `Prob_Fall >= 0.25`, BỎ QUA MỌI CHỜ ĐỢI và kích hoạt ngay chuỗi cảnh báo rung (Pre-alarm SOS). Cơ chế này kết hợp với Precision 94.83% của v14 sẽ tạo ra một hệ thống SOS vừa an toàn vừa cực kỳ đáng tin cậy.
+> 1. **Luồng Khẩn Cấp (Fall):** Theo dõi xác suất từ đầu ra mô hình liên tục. Ngay khi `Prob_Fall >= 0.25`, BỎ QUA MỌI CHỜ ĐỢI và kích hoạt ngay chuỗi cảnh báo rung (Pre-alarm SOS). Cơ chế này kết hợp với Precision cực cao sẽ tạo ra một hệ thống SOS vừa an toàn vừa cực kỳ đáng tin cậy.
 > 
-> 2. **Luồng Hành Vi Liên Tục (Majority Vote):** Dù v14 rất xuất sắc, thực tế cảm biến rung lắc vẫn có thể gây chớp nháy tín hiệu. Phải triển khai Bộ đệm xoay vòng (Circular Buffer) từ 3-5 cửa sổ (tương đương 3-5 giây) để bầu chọn số đông (Majority Vote) cho các lớp Walk, Run và Static. Điều này đảm bảo UI/UX mượt mà trên App điện thoại.
+> 2. **Luồng Hành Vi Liên Tục (Majority Vote):** Dù model xuất sắc, thực tế cảm biến rung lắc vẫn có thể gây chớp nháy tín hiệu. Phải triển khai Bộ đệm xoay vòng (Circular Buffer) từ 3-5 cửa sổ (tương đương 3-5 giây) để bầu chọn số đông (Majority Vote) cho các lớp Walk, Run và Static. Điều này đảm bảo UI/UX mượt mà trên App điện thoại.
