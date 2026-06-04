@@ -48,60 +48,23 @@ int tflite_init(void) {
         return -1;
     }
 
-    // 3. Đăng ký các toán tử
-    static tflite::MicroMutableOpResolver<65> resolver;
-    resolver.AddConv2D();
-    resolver.AddMaxPool2D();
-    resolver.AddReshape();
-    resolver.AddFullyConnected();
-    resolver.AddUnidirectionalSequenceLSTM();
-    resolver.AddConcatenation();
-    resolver.AddSoftmax();
+    // 3. Đăng ký các toán tử cần thiết cho model v25 (đã được trích xuất)
+    static tflite::MicroMutableOpResolver<15> resolver;
     resolver.AddAdd();
-    resolver.AddMul();
-    resolver.AddReduceMax();
-    resolver.AddStridedSlice();
-    resolver.AddPack();
-    resolver.AddWhile();
-    resolver.AddLess();
-    resolver.AddLessEqual();
-    resolver.AddGreater();
-    resolver.AddGreaterEqual();
-    resolver.AddEqual();
-    resolver.AddNotEqual();
-    resolver.AddSelectV2();
-    resolver.AddGather();
-    resolver.AddShape();
-    resolver.AddZerosLike();
-    resolver.AddFill();
-    resolver.AddLogicalAnd();
-    resolver.AddLogicalOr();
-    resolver.AddLogicalNot();
-    resolver.AddSplit();
-    resolver.AddSplitV();
-    resolver.AddSlice();
-    resolver.AddTranspose();
-    resolver.AddSqueeze();
-    resolver.AddUnpack();
-    resolver.AddLogistic(); 
-    resolver.AddTanh();     
-    resolver.AddSub();
-    resolver.AddExp();
-    resolver.AddSquare();
-    resolver.AddSqrt();
-    resolver.AddRsqrt();
-    resolver.AddMaximum();
-    resolver.AddMinimum();
-    resolver.AddRelu();
-    resolver.AddRelu6();
-    resolver.AddPad();
-    resolver.AddPadV2();
-    resolver.AddMean();
-    resolver.AddReduceMin();
-    resolver.AddCast();
+    resolver.AddConcatenation();
+    resolver.AddConv2D();
+    resolver.AddDepthwiseConv2D(); // Thêm op này để sửa lỗi DEPTHWISE_CONV_2D
     resolver.AddExpandDims();
-    resolver.AddSpaceToBatchNd();
-    resolver.AddBatchToSpaceNd();
+    resolver.AddFullyConnected();
+    resolver.AddLogistic();
+    resolver.AddMean();
+    resolver.AddMul();
+    resolver.AddPack();
+    resolver.AddReduceMax();
+    resolver.AddReshape();
+    resolver.AddShape();
+    resolver.AddSoftmax();
+    resolver.AddStridedSlice();
 
     // 4. Build Interpreter
     static tflite::MicroInterpreter static_interpreter(

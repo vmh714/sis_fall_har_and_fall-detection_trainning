@@ -68,6 +68,7 @@ import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix
+import re
 
 # Thiết lập hiển thị cho Matplotlib
 plt.rcParams['font.family'] = 'sans-serif'
@@ -201,7 +202,7 @@ def send_sample_to_esp32(csv_path, ser):
     print("\n[LỖI] Timeout! ESP32 xử lý data xong nhưng không trả về JSON.")
     return None
 
-def run_evaluation(csv_path):
+def run_evaluation(csv_path, arena_used=None):
     if not os.path.exists(csv_path):
         print(f"\n[LỖI] Không tìm thấy file '{csv_path}' để đánh giá hiệu năng!")
         return
@@ -209,7 +210,7 @@ def run_evaluation(csv_path):
     print(f"\n[*] Đang đọc dữ liệu từ '{csv_path}' để tiến hành đánh giá hiệu năng...")
     df = pd.read_csv(csv_path)
     
-    # 5 lớp chuyên biệt theo TCN v24
+    # 5 lớp chuyên biệt theo ResNet-1D v25
     CLASS_NAMES = ['Walk', 'Run', 'Idle', 'Trans', 'Fall']
     
     # Ánh xạ nhãn thực tế (Expected_Class) từ CSV về 5 lớp
@@ -255,10 +256,25 @@ def run_evaluation(csv_path):
     # Tính toán Confusion Matrix và Classification Report
     cm = confusion_matrix(y_true, y_pred, labels=CLASS_NAMES)
     
+    time_info = ""
+    if 'Time_ms' in df_valid.columns:
+        avg_time = df_valid['Time_ms'].mean()
+        max_time = df_valid['Time_ms'].max()
+        min_time = df_valid['Time_ms'].min()
+        time_info += f"- Thời gian Inference trung bình: {avg_time:.2f} ms\n"
+        time_info += f"- Thời gian Inference Max/Min: {max_time:.2f} / {min_time:.2f} ms\n"
+        
+    arena_info = ""
+    if arena_used is not None:
+        arena_info = f"- Tensor Arena (RAM) sử dụng: {arena_used} bytes\n"
+
     # Tạo chuỗi báo cáo
     report_str = "\n" + "="*50 + "\n"
-    report_str += "BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - TCN v24 (5 Lớp)\n"
+    report_str += "BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - v25 (ResNet-1D)\n"
     report_str += f"Dựa trên file: {csv_path}\n"
+    report_str += f"- Tổng số mẫu test thành công: {total_samples}\n"
+    report_str += time_info
+    report_str += arena_info
     report_str += "="*50 + "\n"
     
     cls_report = classification_report(y_true, y_pred, labels=CLASS_NAMES, target_names=CLASS_NAMES, digits=4)
@@ -284,17 +300,17 @@ def run_evaluation(csv_path):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Đường dẫn file đầu ra chính
-    out_txt_path = os.path.join(base_dir, "report_v24_firmware.txt")
-    out_img_path = os.path.join(base_dir, "confusion_matrix_v24_firmware.png")
+    out_txt_path = os.path.join(base_dir, "report_v25_firmware.txt")
+    out_img_path = os.path.join(base_dir, "confusion_matrix_v25_firmware.png")
     
     with open(out_txt_path, 'w', encoding='utf-8') as rf:
         rf.write(report_str)
     print(f"[+] Đã lưu báo cáo chi tiết vào file: '{out_txt_path}'")
     
-    # Đồng thời lưu vào train_v24_kq nếu thư mục đó tồn tại
-    train_kq_dir = os.path.join(base_dir, "train_v24_kq")
+    # Đồng thời lưu vào train_v25_kq nếu thư mục đó tồn tại
+    train_kq_dir = os.path.join(base_dir, "train_v25_kq")
     if os.path.exists(train_kq_dir):
-        out_txt_path_kq = os.path.join(train_kq_dir, "report_v24_firmware.txt")
+        out_txt_path_kq = os.path.join(train_kq_dir, "report_v25_firmware.txt")
         with open(out_txt_path_kq, 'w', encoding='utf-8') as rf:
             rf.write(report_str)
         print(f"[+] Đã lưu bản sao báo cáo chi tiết vào: '{out_txt_path_kq}'")
@@ -305,7 +321,7 @@ def run_evaluation(csv_path):
                 xticklabels=CLASS_NAMES, yticklabels=CLASS_NAMES,
                 annot_kws={"size": 14, "weight": "bold"})
     
-    plt.title('Confusion Matrix - TCN v24 on Firmware (5 Classes)', fontsize=14, fontweight='bold', pad=15)
+    plt.title('Confusion Matrix - v25 on Firmware (5 Classes)', fontsize=14, fontweight='bold', pad=15)
     plt.ylabel('Nhãn Thực Tế (Ground Truth)', fontsize=12, fontweight='bold')
     plt.xlabel('Nhãn Dự Đoán (Firmware Predict)', fontsize=12, fontweight='bold')
     
@@ -316,9 +332,9 @@ def run_evaluation(csv_path):
     plt.savefig(out_img_path, dpi=300)
     print(f"[+] Đã vẽ và lưu ma trận nhầm lẫn thành file: '{out_img_path}'")
     
-    # Đồng thời lưu vào train_v24_kq nếu thư mục đó tồn tại
+    # Đồng thời lưu vào train_v25_kq nếu thư mục đó tồn tại
     if os.path.exists(train_kq_dir):
-        out_img_path_kq = os.path.join(train_kq_dir, "confusion_matrix_v24_firmware.png")
+        out_img_path_kq = os.path.join(train_kq_dir, "confusion_matrix_v25_firmware.png")
         plt.savefig(out_img_path_kq, dpi=300)
         print(f"[+] Đã lưu bản sao ma trận nhầm lẫn vào: '{out_img_path_kq}'")
         
@@ -336,7 +352,7 @@ if __name__ == "__main__":
     print("Để thoát khỏi trạng thái đóng băng, hãy bấm phím ESC hoặc Enter.")
     print("="*60 + "\n")
 
-    parser = argparse.ArgumentParser(description="Tool bắn dữ liệu inference xuống ESP32 và tự động đánh giá hiệu năng TCN v24")
+    parser = argparse.ArgumentParser(description="Tool bắn dữ liệu inference xuống ESP32 và tự động đánh giá hiệu năng v25")
     parser.add_argument("--file", "-f", type=str, help="Đường dẫn đến 1 file CSV")
     parser.add_argument("--folder", "-d", type=str, default="SisFall_dataset_Windowed", help="Thư mục chứa file CSV (mặc định: SisFall_dataset_Windowed)")
     parser.add_argument("--samples", "-n", type=int, default=100, help="Số lượng file muốn bốc bừa CHO MỖI NHÃN")
@@ -402,6 +418,12 @@ if __name__ == "__main__":
         print("[ESP32 BOOT LOG]:")
         print(boot_log_full.strip())
         print("-" * 40)
+        
+        # Lấy thông tin Tensor Arena từ log boot
+        arena_used = None
+        arena_match = re.search(r"Actual Arena Used:\s*(\d+)\s*bytes", boot_log_full, re.IGNORECASE)
+        if arena_match:
+            arena_used = arena_match.group(1)
         
         if not ready:
             print("\n[!] QUÁ THỜI GIAN CHỜ ESP32 KHỞI ĐỘNG! Có thể mạch đang bị crash (Panic).")
@@ -542,6 +564,6 @@ if __name__ == "__main__":
         print(df_results.head(5).to_string())
         
         # Tự động gọi run_evaluation
-        run_evaluation(out_file)
+        run_evaluation(out_file, arena_used=arena_used)
     else:
         print("Không có kết quả nào được trả về hợp lệ từ ESP32.")

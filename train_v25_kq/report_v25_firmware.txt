@@ -1,6 +1,12 @@
-
 ==================================================
-BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - TCN v24 (5 Lớp)
+I (1148) TFLiteWrapper: Total Arena Size Configured: 102400 bytes (PSRAM)
+I (1148) TFLiteWrapper: Actual Arena Used: 28844 bytes
+==================================================
+- Tổng số mẫu test thành công: 1200
+- Thời gian Inference trung bình: 70.23 ms
+- Thời gian Inference Max/Min: 70.32 / 70.07 ms
+==================================================
+BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - TCN v25 (ResNet-1D)
 Dựa trên file: D:\New folder\sis_fall_har_and_fall-detection_trainning\inference_results.csv
 ==================================================
               precision    recall  f1-score   support
