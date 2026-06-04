@@ -1,0 +1,55 @@
+Ran command: `python .\train_v8_tcn.py`
+Viewed train_v8_tcn.py:204-237
+Edited train_v8_tcn.py
+Viewed report_v8.txt:1-26
+Viewed train_v8_tcn.py:210-235
+
+Dựa trên kết quả trong file `report_v8.txt`, tôi có vài nhận xét như sau:
+
+### 1. Nhận xét kết quả hiện tại
+* **Recall của lớp Fall đạt 93.56%** (phát hiện được 421/450 ca). Đã tăng lên đáng kể so với trước đó (86.67%), nhưng vẫn còn thiếu một chút nữa để đạt mốc mục tiêu $\ge$ 95%.
+* **Precision của lớp Fall đạt mức tuyệt đối 1.0000 (100%)**: Điều này cực kỳ thú vị! Nó có nghĩa là một khi mô hình đã báo "Fall" thì chắc chắn 100% đó là một cú ngã thật sự (không có bất kỳ báo động giả nào từ 7333 mẫu còn lại).
+* Tuy nhiên, chính vì Precision = 100% nên mô hình đang ở trạng thái **quá rụt rè (conservative)**. Nó thà bỏ sót 29 cú ngã (False Negatives) chứ nhất quyết không chịu nhận diện nhầm. Đối với ứng dụng y tế/cảnh báo té ngã, chúng ta hoàn toàn có thể "hi sinh" một ít Precision để đổi lấy Recall cao hơn (thà báo nhầm vài ca ADL còn hơn để lọt ca ngã thật).
+
+### 2. Đề xuất các giải pháp cải thiện (Để đẩy Recall vượt 95%)
+
+Chúng ta có 2 hướng giải quyết chính, rất dễ áp dụng ngay:
+
+#### Giải pháp A: Ép trọng số nặng hơn nữa (Dễ nhất)
+Hiện tại tôi đã nhân trọng số `class_weights` lên 5 lần. Bạn có thể mở `train_v8_tcn.py`, sửa dòng 224 từ `* 5.0` thành `* 8.0` hoặc `* 10.0`.
+```python
+# Tăng phạt lên 10 lần thay vì 5 lần
+class_weights[fall_idx] *= 10.0
+```
+Cách này ép mô hình trong lúc học Keras phải giảm ranh giới quyết định xuống.
+
+#### Giải pháp B: Tinh chỉnh Threshold (Ngưỡng quyết định) lúc Inference (Khuyên dùng cho MCU)
+Mặc định hàm `np.argmax()` sẽ chọn nhãn có xác suất lớn nhất (thường $> 0.5$). Thay vì dùng `argmax`, chúng ta có thể hạ ngưỡng (Threshold) phát hiện ngã xuống `0.3` hoặc `0.25`. Nghĩa là chỉ cần xác suất mô hình cho lớp Fall $\ge$ 25% là hệ thống cảnh báo ngay lập tức.
+
+**Cách sửa trong Python (để đánh giá):**
+Trong `train_v8_tcn.py`, thay vì dòng:
+```python
+y_pred = np.argmax(y_pred_probs, axis=1)
+```
+Ta sửa thành:
+```python
+# Lấy xác suất của lớp Fall
+fall_idx = CLASS_NAMES.index('Fall')
+fall_probs = y_pred_probs[:, fall_idx]
+
+# Hạ ngưỡng cảnh báo xuống 0.25
+y_pred = np.argmax(y_pred_probs, axis=1) # Dự đoán gốc
+y_pred[fall_probs >= 0.25] = fall_idx    # Ghi đè: Cứ xác suất Fall >= 0.25 thì chốt là Fall
+```
+
+**Cách dùng trên Firmware C++ (ESP32-S3):**
+Rất tiện lợi, trong code `main.cc`, bạn chỉ cần kiểm tra:
+```cpp
+if (output_data[3] >= 0.25) {  // 3 là index của Fall
+    trigger_fall_alarm();
+} else {
+    // Tìm max của 3 nhãn còn lại (Walk, Run, ADL)
+}
+```
+
+Bạn muốn tôi trực tiếp chỉnh sửa `train_v8_tcn.py` áp dụng **Giải pháp B** (Threshold 0.25) vào hàm đánh giá Confusion Matrix để xem Recall có vượt 95% không nhé?

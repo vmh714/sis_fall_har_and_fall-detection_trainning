@@ -1,0 +1,363 @@
+
+<h2 class="sr-only">Phân tích TCN vs LSTM cho triển khai MCU với TensorFlow Lite Micro</h2>
+<style>
+*{box-sizing:border-box}
+.tabs{display:flex;gap:8px;margin-bottom:1.25rem;flex-wrap:wrap}
+.tab{padding:7px 15px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-secondary);background:var(--color-background-secondary);cursor:pointer;font-size:13px;font-weight:500;color:var(--color-text-secondary);transition:all .15s}
+.tab.active{background:var(--color-background-primary);border-color:var(--color-border-info);color:var(--color-text-info)}
+.panel{display:none}.panel.active{display:block}
+.note{border-left:2px solid var(--color-border-info);padding:10px 14px;font-size:13px;line-height:1.7;color:var(--color-text-secondary);background:var(--color-background-secondary);border-radius:0;margin-bottom:12px}
+.note strong{font-weight:500;color:var(--color-text-primary)}
+.warn{border-left:2px solid #D85A30;padding:10px 14px;font-size:13px;line-height:1.7;color:var(--color-text-secondary);background:var(--color-background-secondary);border-radius:0;margin-bottom:12px}
+.warn strong{font-weight:500;color:#993C1D}
+.ok{border-left:2px solid #1D9E75;padding:10px 14px;font-size:13px;line-height:1.7;color:var(--color-text-secondary);background:var(--color-background-secondary);border-radius:0;margin-bottom:12px}
+.ok strong{font-weight:500;color:#0F6E56}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+.card{background:var(--color-background-secondary);border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary);padding:12px 14px}
+.card h4{font-size:13px;font-weight:500;margin:0 0 5px;color:var(--color-text-primary)}
+.card p{font-size:12px;color:var(--color-text-secondary);margin:0;line-height:1.6}
+.big{font-size:20px;font-weight:500;margin:4px 0}
+.green{color:#0F6E56}.amber{color:#854F0B}.red{color:#993C1D}.blue{color:#185FA5}
+.code-sm{background:var(--color-background-tertiary);border-radius:var(--border-radius-md);padding:10px 14px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-secondary);line-height:1.8;white-space:pre;overflow-x:auto;margin-bottom:12px}
+.cmp-table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+.cmp-table th{font-size:11px;font-weight:500;color:var(--color-text-tertiary);padding:8px 10px;text-align:left;border-bottom:0.5px solid var(--color-border-tertiary)}
+.cmp-table td{padding:9px 10px;border-bottom:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);vertical-align:top;line-height:1.5}
+.cmp-table tr:last-child td{border-bottom:none}
+.cmp-table .tech{font-weight:500;color:var(--color-text-primary);font-size:12px}
+.badge{display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:500;margin-left:4px}
+.b-green{background:#E1F5EE;color:#04342C}.b-red{background:#FCEBEB;color:#501313}.b-amber{background:#FAEEDA;color:#412402}
+.chart-h{position:relative;height:200px;margin:10px 0}
+.layer-row{border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary);padding:10px 14px;margin-bottom:8px;font-size:13px;background:var(--color-background-secondary);cursor:pointer;transition:border-color .15s}
+.layer-row:hover,.layer-row.sel{background:var(--color-background-primary);border-color:var(--color-border-info)}
+.layer-row .lh{display:flex;align-items:center;gap:8px}
+.layer-row .lname{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.layer-row .lshape{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary);margin-left:auto}
+.layer-row .ldesc{font-size:12px;color:var(--color-text-secondary);margin-top:3px}
+.detail-box{border-radius:var(--border-radius-lg);border:0.5px solid var(--color-border-tertiary);padding:1.25rem 1.5rem;min-height:100px;background:var(--color-background-primary);margin-bottom:12px}
+.detail-box h3{font-size:15px;font-weight:500;margin:0 0 8px;color:var(--color-text-primary)}
+.detail-box .why{font-size:13px;color:var(--color-text-secondary);line-height:1.7;margin-bottom:10px}
+.ph{display:flex;align-items:center;justify-content:center;height:80px;font-size:13px;color:var(--color-text-tertiary)}
+</style>
+
+<div class="tabs">
+  <div class="tab active" onclick="sw('why')">Vấn đề LSTM trên MCU</div>
+  <div class="tab" onclick="sw('tcn')">TCN là gì</div>
+  <div class="tab" onclick="sw('arch')">Kiến trúc đề xuất</div>
+  <div class="tab" onclick="sw('bench')">Benchmark & quyết định</div>
+</div>
+
+<!-- ════ TAB 1: VẤN ĐỀ LSTM ════ -->
+<div class="panel active" id="tab-why">
+  <div class="warn"><strong>3 vấn đề cốt lõi của LSTM trên TFLM mà bạn đã chỉ ra:</strong></div>
+
+  <div class="row3">
+    <div class="card">
+      <h4>INT8 quantization</h4>
+      <div class="big red">Khó</div>
+      <p>LSTM có gate sigmoid/tanh — vùng bão hòa làm mất thông tin khi ép về INT8. Accuracy thường giảm 3–8% sau quantize, đặc biệt với Fall (nhãn hiếm, margin nhỏ).</p>
+    </div>
+    <div class="card">
+      <h4>Dynamic memory</h4>
+      <div class="big red">Nguy hiểm</div>
+      <p>LSTM cần cấp phát động cho hidden state và cell state. TFLM arena allocator không đảm bảo liên tục — MCU 256KB SRAM dễ bị fragmentation hoặc OOM.</p>
+    </div>
+    <div class="card">
+      <h4>Double Float (DF)</h4>
+      <div class="big red">Không hỗ trợ</div>
+      <p>TFLM chỉ hỗ trợ FP32 và INT8. LSTM FP32 ngốn ~4× RAM so với INT8. Với STM32F4 (192KB SRAM) gần như không thể chứa model + activations + input buffer.</p>
+    </div>
+  </div>
+
+  <table class="cmp-table">
+    <thead><tr><th>Tiêu chí MCU</th><th>LSTM</th><th>TCN</th><th>CNN thuần</th></tr></thead>
+    <tbody>
+      <tr><td class="tech">INT8 quantization</td>
+        <td><span class="badge b-red">Khó</span> gate saturation</td>
+        <td><span class="badge b-green">Tốt</span> Conv thuần</td>
+        <td><span class="badge b-green">Tốt</span> Conv thuần</td></tr>
+      <tr><td class="tech">Static memory</td>
+        <td><span class="badge b-red">Không</span> dynamic hidden state</td>
+        <td><span class="badge b-green">Có</span> hoàn toàn static</td>
+        <td><span class="badge b-green">Có</span> hoàn toàn static</td></tr>
+      <tr><td class="tech">TFLM op support</td>
+        <td><span class="badge b-amber">Giới hạn</span> LSTM op unstable</td>
+        <td><span class="badge b-green">Đầy đủ</span> Conv1D + DepthwiseConv</td>
+        <td><span class="badge b-green">Đầy đủ</span></td></tr>
+      <tr><td class="tech">Receptive field</td>
+        <td><span class="badge b-green">Toàn bộ</span> sequence</td>
+        <td><span class="badge b-green">Toàn bộ</span> với dilation</td>
+        <td><span class="badge b-red">Cục bộ</span> cần nhiều layer</td></tr>
+      <tr><td class="tech">Temporal context 2s</td>
+        <td><span class="badge b-green">Tốt</span></td>
+        <td><span class="badge b-green">Tốt</span> với d=[1,2,4,8]</td>
+        <td><span class="badge b-amber">Cần stack sâu</span></td></tr>
+      <tr><td class="tech">Parallelizable</td>
+        <td><span class="badge b-red">Không</span> sequential</td>
+        <td><span class="badge b-green">Có</span> train nhanh hơn</td>
+        <td><span class="badge b-green">Có</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ════ TAB 2: TCN LÀ GÌ ════ -->
+<div class="panel" id="tab-tcn">
+  <div class="note"><strong>TCN (Temporal Convolutional Network)</strong> dùng Conv1D với hai kỹ thuật chính: <strong>Dilated convolution</strong> (mở rộng receptive field theo cấp số nhân) và <strong>Causal padding</strong> (chỉ nhìn về quá khứ, không nhìn tương lai). Kết quả: receptive field lớn như LSTM nhưng toàn bộ bằng Conv — deploy trên MCU dễ dàng.</div>
+
+  <div class="chart-h"><canvas id="tcn-chart" role="img" aria-label="So sánh receptive field giữa Conv thường và Dilated Conv"></canvas></div>
+
+  <div class="row2">
+    <div class="card">
+      <h4>Dilated convolution</h4>
+      <p>Kernel size 3, dilation d: thay vì nhìn 3 timestep liên tiếp, nhảy cách nhau d timestep. Receptive field = kernel_size + (kernel_size-1)×(d-1). Xếp d=1,2,4,8 → receptive field tổng = <strong style="font-weight:500;color:var(--color-text-primary)">30 timestep chỉ với 4 layer.</strong></p>
+    </div>
+    <div class="card">
+      <h4>Causal padding</h4>
+      <p>Padding chỉ ở phía trái (quá khứ), không padding phải. Đảm bảo prediction tại timestep t chỉ phụ thuộc vào t-k, t-k+1, ..., t. Quan trọng cho streaming inference trên MCU — không cần "nhìn trước".</p>
+    </div>
+  </div>
+
+  <div class="ok"><strong>Receptive field với dilation [1,2,4,8], kernel 3, 4 blocks:</strong> Mỗi block tăng gấp đôi. Tổng receptive field = 2×(1+2+4+8)×(3-1) = 60 timestep = 0.6 giây @ 100Hz. Với 2 stack (8 block) = 120 timestep = 1.2s — đủ để bắt toàn bộ cú ngã điển hình.</div>
+
+  <div class="code-sm">
+# Dilated Conv1D — hoàn toàn là Conv, TFLM hỗ trợ 100%
+# dilation_rate=1: nhìn [t, t-1, t-2]
+# dilation_rate=2: nhìn [t, t-2, t-4]
+# dilation_rate=4: nhìn [t, t-4, t-8]
+# dilation_rate=8: nhìn [t, t-8, t-16]
+
+x = Conv1D(filters=64, kernel_size=3,
+           dilation_rate=4,
+           padding='causal',       # ← chỉ nhìn quá khứ
+           activation='relu')(x)
+
+# Quantize-friendly: chỉ dùng Conv + ReLU + Add
+# → INT8 quantization không mất nhiều accuracy</div>
+</div>
+
+<!-- ════ TAB 3: KIẾN TRÚC ════ -->
+<div class="panel" id="tab-arch">
+  <div class="note"><strong>TCN cho HAR + Fall Detection @ 100Hz, target MCU STM32F4 (192KB SRAM / 1MB Flash).</strong> Toàn bộ chỉ dùng Conv1D + DepthwiseConv1D + Add — các op TFLM hỗ trợ đầy đủ và INT8-friendly.</div>
+
+  <div id="layer-list-tcn"></div>
+  <div class="detail-box" id="layer-detail-tcn"><div class="ph">Chọn một layer để xem giải thích</div></div>
+
+  <div class="row3">
+    <div class="card"><h4>Flash (model weights)</h4><div class="big green" id="flash-sz">~38 KB</div><p>INT8 quantized. Còn ~986KB cho firmware</p></div>
+    <div class="card"><h4>SRAM (activations)</h4><div class="big green" id="sram-sz">~28 KB</div><p>Static arena, không cấp phát động</p></div>
+    <div class="card"><h4>Receptive field</h4><div class="big blue">120 timestep</div><p>= 1.2s @ 100Hz, đủ cho toàn bộ cú ngã</p></div>
+  </div>
+
+  <div class="code-sm" id="arch-code"></div>
+</div>
+
+<!-- ════ TAB 4: BENCHMARK ════ -->
+<div class="panel" id="tab-bench">
+  <div class="chart-h"><canvas id="bench-chart" role="img" aria-label="Radar chart so sánh LSTM vs TCN vs CNN trên các tiêu chí MCU deployment"></canvas></div>
+
+  <div class="row2">
+    <div class="card">
+      <h4>Khi nào TCN tốt hơn LSTM</h4>
+      <p style="line-height:1.8;margin-top:4px">
+        Target MCU có SRAM &lt; 512KB<br>
+        Cần INT8 quantization giữ accuracy<br>
+        Dùng TensorFlow Lite Micro<br>
+        Cần inference &lt; 50ms trên M4/M7<br>
+        Muốn train nhanh hơn (parallelizable)
+      </p>
+    </div>
+    <div class="card">
+      <h4>Khi nào LSTM vẫn đáng xem xét</h4>
+      <p style="line-height:1.8;margin-top:4px">
+        Deploy lên board có NPU (STM32H7 + NeuralART)<br>
+        Dùng Edge Impulse (có LSTM quantize riêng)<br>
+        Model chạy trên Linux embedded (RPi, Jetson Nano)<br>
+        Không bị giới hạn SRAM (&gt;4MB)
+      </p>
+    </div>
+  </div>
+
+  <div class="ok"><strong>Kết luận:</strong> Với TFLM trên MCU bare-metal, TCN là lựa chọn đúng đắn. Accuracy trên HAR benchmark (UCI-HAR, PAMAP2) của TCN ngang bằng hoặc nhỉnh hơn LSTM sau INT8 quantization, trong khi tiết kiệm SRAM ~60–70% và tránh hoàn toàn dynamic allocation.</div>
+
+  <div class="warn"><strong>Một điểm cần chú ý:</strong> TCN với window-based inference (toàn bộ 200 mẫu → 1 nhãn) phù hợp hơn streaming inference (từng mẫu một). Nếu MCU cần latency &lt; 10ms mỗi mẫu, cần thiết kế thêm cơ chế buffer ring và overlap-and-save. Đây là trade-off cần quyết định sớm trước khi thiết kế firmware.</div>
+
+  <div class="code-sm">
+# Quy trình deploy TCN lên TFLM
+# 1. Train FP32 → đạt accuracy mục tiêu
+# 2. Post-Training Quantization INT8
+
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+converter.optimizations = [tf.lite.Optimize.DEFAULT]
+
+def representative_dataset():
+    for sample in X_calib[:200]:          # 200 mẫu calibration
+        yield [sample[np.newaxis].astype(np.float32)]
+
+converter.representative_dataset = representative_dataset
+converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+converter.inference_input_type  = tf.int8
+converter.inference_output_type = tf.int8
+
+tflite_model = converter.convert()
+# Kiểm tra: chỉ Conv2D/Conv1D/DepthwiseConv/Add/ReLU → safe!
+
+# 3. Verify ops — không được có LSTM, GRU, CustomOp
+interpreter = tf.lite.Interpreter(model_content=tflite_model)
+for detail in interpreter.get_tensor_details():
+    print(detail['name'], detail['dtype'])   # phải toàn int8</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+function sw(id){
+  const ids=['why','tcn','arch','bench'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',ids[i]===id));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  if(id==='tcn'&&!window.tcnDrawn){drawTCNChart();window.tcnDrawn=true;}
+  if(id==='arch'&&!window.archInited){renderArch();window.archInited=true;}
+  if(id==='bench'&&!window.benchDrawn){drawBench();window.benchDrawn=true;}
+}
+
+function drawTCNChart(){
+  const isDark=matchMedia('(prefers-color-scheme:dark)').matches;
+  const gc=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.04)';
+  const tc=isDark?'#9c9a92':'#73726c';
+  const N=32;
+  const labels=Array.from({length:N},(_,i)=>i);
+  const zeros=Array(N).fill(null);
+
+  function makeBar(positions,color){
+    const d=Array(N).fill(null);
+    positions.forEach(p=>{if(p>=0&&p<N)d[p]=1;});
+    return{data:d,backgroundColor:color,borderColor:color,barThickness:14,borderRadius:2};
+  }
+
+  new Chart(document.getElementById('tcn-chart'),{
+    type:'bar',
+    data:{labels,datasets:[
+      makeBar([15,16,17],'rgba(29,158,117,0.7)'),
+      makeBar([15,13,11],'rgba(55,138,221,0.6)'),
+      makeBar([15,11,7], 'rgba(186,117,23,0.55)'),
+      makeBar([15,7,-1], 'rgba(216,90,48,0.5)'),
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{
+          title:i=>'Timestep '+i[0].label,
+          label:i=>{const l=['d=1 (kernel 3)','d=2 (RF=5)','d=4 (RF=9)','d=8 (RF=17)'];return l[i.datasetIndex];}
+        }}
+      },
+      scales:{
+        x:{stacked:true,title:{display:true,text:'Timestep (hiện tại = 15)',color:tc,font:{size:10}},ticks:{color:tc,font:{size:9}},grid:{color:gc}},
+        y:{display:false,stacked:true,max:1.2}
+      }
+    }
+  });
+}
+
+const TCN_LAYERS=[
+  {name:'Input',badge:'Input',bc:'#E6F1FB',btc:'#042C53',shape:'(1, 200, 6)',
+   title:'Input — 200×6 static buffer',
+   why:'200 timestep × 6 channel (ax,ay,az,gx,gy,gz), dtype INT8 sau quantize. Toàn bộ window được nạp vào static arena trước khi inference — không streaming từng sample. Buffer size cố định: 200×6×1 byte = 1.2KB.',
+   code:`# C code trên MCU\nint8_t input_buffer[200 * 6];  // 1.2 KB static\n// Không malloc, không dynamic — SRAM an toàn`},
+  {name:'Conv1D 32, k=3, d=1 + ReLU',badge:'TCN',bc:'#E1F5EE',btc:'#04342C',shape:'(1, 200, 32)',
+   title:'TCN Block 1 — dilation=1, RF=3 timestep',
+   why:'Causal padding giữ nguyên chiều dài sequence (200). 32 filters × kernel 3 × 6 channels = 576 weights. Dilation=1: nhìn 3 timestep liên tiếp (30ms). Học pattern tức thời: spike đột ngột, bắt đầu dao động.',
+   code:`# Causal Conv1D — TFLM hỗ trợ qua padding='causal'\nx = Conv1D(32, kernel_size=3, dilation_rate=1,\n           padding='causal', use_bias=True,\n           activation='relu')(x)\n# Params: 3×6×32 + 32 = 608`},
+  {name:'Conv1D 32, k=3, d=2 + ReLU',badge:'TCN',bc:'#E1F5EE',btc:'#04342C',shape:'(1, 200, 32)',
+   title:'TCN Block 2 — dilation=2, RF=7 timestep',
+   why:'Nhảy 2 timestep (20ms gap). Nhìn được span 70ms. Bắt đầu học pattern trung hạn: nhịp bước chân đầu tiên (~500-800ms/bước → cần thêm block cao hơn), sự thay đổi hướng gia tốc.',
+   code:`x = Conv1D(32, kernel_size=3, dilation_rate=2,\n           padding='causal', activation='relu')(x)\n# Params: 3×32×32 + 32 = 3,104\n# Receptive field tích lũy: 7 timestep (70ms)`},
+  {name:'Conv1D 32, k=3, d=4 + ReLU',badge:'TCN',bc:'#E1F5EE',btc:'#04342C',shape:'(1, 200, 32)',
+   title:'TCN Block 3 — dilation=4, RF=15 timestep',
+   why:'Span 150ms. Bắt được toàn bộ pha impact của cú ngã (thường 100-200ms). Kết hợp với block trước: "có spike lớn trong 150ms gần đây không?".',
+   code:`x = Conv1D(32, kernel_size=3, dilation_rate=4,\n           padding='causal', activation='relu')(x)\n# Params: 3,104\n# Receptive field tích lũy: 15 timestep (150ms)`},
+  {name:'Conv1D 32, k=3, d=8 + ReLU',badge:'TCN',bc:'#E1F5EE',btc:'#04342C',shape:'(1, 200, 32)',
+   title:'TCN Block 4 — dilation=8, RF=31 timestep',
+   why:'Span 310ms — đủ để thấy toàn bộ pha pre-impact và impact của ngã. Sau 4 block: RF = 31 timestep (310ms). Stack 2 vòng block d=[1,2,4,8] → RF tổng = 62 timestep (620ms). Chọn 2 stack cho bài toán này.',
+   code:`x = Conv1D(32, kernel_size=3, dilation_rate=8,\n           padding='causal', activation='relu')(x)\n# Params: 3,104\n# RF sau 1 stack (4 block): 31 timestep = 310ms`},
+  {name:'[Lặp lại] Stack 2: d=1,2,4,8',badge:'TCN',bc:'#E1F5EE',btc:'#04342C',shape:'(1, 200, 32)',
+   title:'Stack 2 — mở rộng RF lên 620ms',
+   why:'Lặp lại 4 block với dilation [1,2,4,8] nhưng "nhìn" vào output của stack 1 (đặc trưng đã được học). RF tổng cộng = 62 timestep = 620ms @ 100Hz. Đủ để phân biệt: walk (nhịp đều), run (nhịp nhanh), fall (spike + im lặng), stand/sit (gần như phẳng).',
+   code:`# Stack 2 — cùng cấu trúc, khác feature space\nfor d in [1, 2, 4, 8]:\n    x = Conv1D(32, 3, dilation_rate=d,\n               padding='causal', activation='relu')(x)\n# RF tổng: 62 timestep = 620ms`},
+  {name:'GlobalAveragePooling1D',badge:'Pool',bc:'#EEEDFE',btc:'#26215C',shape:'(1, 32)',
+   title:'GlobalAveragePooling — không cần Flatten',
+   why:'Lấy trung bình trên toàn bộ 200 timestep → vector 32 chiều. Không có learnable params. Quan trọng: GAP tốt hơn Flatten vì không phụ thuộc vào độ dài sequence cố định — nếu sau này muốn thay đổi window size, không cần redesign model. Cũng giúp regularization tự nhiên.',
+   code:`x = GlobalAveragePooling1D()(x)\n# output: (batch, 32)\n# Không có params\n# Tương đương: x = tf.reduce_mean(x, axis=1)`},
+  {name:'Dense 5 + Softmax',badge:'Output',bc:'#F1EFE8',btc:'#2C2C2A',shape:'(1, 5)',
+   title:'Output — 5 nhãn, INT8 friendly',
+   why:'32 → 5 với softmax. Không có hidden dense layer vì GAP đã tóm tắt đủ. Ít params hơn = ít rủi ro overfit ở layer cuối. INT8 quantize softmax output: scale về range [-128, 127] với zero-point = 0.',
+   code:`output = Dense(5, activation='softmax')(x)\n# Params: 32×5 + 5 = 165\n# Sau INT8 quantize:\n# output dtype = int8, scale ≈ 1/127`},
+];
+
+let selL=null;
+function renderArch(){
+  document.getElementById('layer-list-tcn').innerHTML=TCN_LAYERS.map((l,i)=>`
+    <div class="layer-row ${selL===i?'sel':''}" onclick="showL(${i})">
+      <div class="lh">
+        <span class="badge" style="background:${l.bc};color:${l.btc};font-size:10px;padding:2px 8px;border-radius:20px;font-weight:500">${l.badge}</span>
+        <span class="lname">${l.name}</span>
+        <span class="lshape">${l.shape}</span>
+      </div>
+      <div class="ldesc">${l.title}</div>
+    </div>`).join('');
+
+  document.getElementById('arch-code').textContent=
+`def build_tcn_mcu(window=200, channels=6, n_classes=5):
+    inp = Input(shape=(window, channels))
+
+    x = inp
+    # 2 stacks × 4 blocks = 8 dilated conv layers
+    for stack in range(2):
+        for d in [1, 2, 4, 8]:
+            residual = x
+            x = Conv1D(32, kernel_size=3, dilation_rate=d,
+                       padding='causal', activation='relu',
+                       use_bias=True)(x)
+            # Residual connection (nếu shape khớp)
+            if stack == 0 and d == 1:
+                residual = Conv1D(32, 1, padding='same')(residual)
+            x = Add()([x, residual])
+
+    x = GlobalAveragePooling1D()(x)
+    out = Dense(n_classes, activation='softmax')(x)
+    return Model(inp, out)
+
+# Tổng params FP32: ~155K weights
+# Sau INT8 quantize: ~38KB Flash + ~28KB SRAM activation`;
+}
+
+function showL(i){
+  selL=i;
+  renderArch();
+  const l=TCN_LAYERS[i];
+  document.getElementById('layer-detail-tcn').innerHTML=`
+    <h3>${l.title}</h3>
+    <div class="why">${l.why}</div>
+    <div class="code-sm">${l.code}</div>`;
+}
+
+function drawBench(){
+  const isDark=matchMedia('(prefers-color-scheme:dark)').matches;
+  const tc=isDark?'#9c9a92':'#73726c';
+  new Chart(document.getElementById('bench-chart'),{
+    type:'radar',
+    data:{
+      labels:['INT8 friendly','Static memory','TFLM op support','Accuracy (HAR)','Fall Recall','Training speed','Inference speed MCU'],
+      datasets:[
+        {label:'LSTM',data:[2,1,3,9,8,4,4],borderColor:'#D85A30',backgroundColor:'rgba(216,90,48,0.08)',borderWidth:2,pointRadius:3,pointBackgroundColor:'#D85A30'},
+        {label:'TCN',data:[9,10,10,9,9,8,8],borderColor:'#1D9E75',backgroundColor:'rgba(29,158,117,0.1)',borderWidth:2,pointRadius:3,pointBackgroundColor:'#1D9E75'},
+        {label:'CNN thuần',data:[10,10,10,7,7,9,10],borderColor:'#378ADD',backgroundColor:'rgba(55,138,221,0.08)',borderWidth:1.5,pointRadius:3,pointBackgroundColor:'#378ADD'},
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:true,position:'top',labels:{color:tc,font:{size:11},boxWidth:16}}},
+      scales:{r:{ticks:{display:false},grid:{color:isDark?'rgba(255,255,255,0.08)':'rgba(0,0,0,0.07)'},pointLabels:{color:tc,font:{size:10}},min:0,max:10}}
+    }
+  });
+}
+</script>

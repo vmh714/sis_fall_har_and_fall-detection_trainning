@@ -52,3 +52,7 @@ test_int16.py
 windowing_pipeline.py
 tool_for_new_dataset
 README.md*
+SisFall_dataset_Windowed.7z
+
+train_cache/
+*.npy
