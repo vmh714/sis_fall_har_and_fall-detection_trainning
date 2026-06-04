@@ -11,7 +11,7 @@ __pycache__/
 # 2. Dữ liệu (Datasets) và File nén
 SisFall_dataset/
 SisFall_dataset_Processed/
-SisFall_dataset_Windowed/
+SisFall_dataset_Windowed*/
 archive.zip
 *.zip
 *.7z

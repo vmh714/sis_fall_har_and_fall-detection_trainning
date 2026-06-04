@@ -9,21 +9,22 @@ from pathlib import Path
 # Add project root to sys.path to import ml_pipeline
 CURRENT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(CURRENT_DIR))
-from ml_pipeline_v26 import DataPreprocessor, OutputReporter
+# QUAN TRỌNG: Import ml_pipeline gốc (dataset v18_v19) thay vì ml_pipeline_v26
+from ml_pipeline import DataPreprocessor, OutputReporter
+
 # Cấu hình
-DATA_DIR = 'SisFall_dataset_Windowed'
-CACHE_DIR = 'train_cache_v26'  # Sử dụng thư mục cache mới cho v26
-OUT_DIR = 'train_v26_kq'
+DATA_DIR = 'tool_for_new_dataset/SisFall_dataset_Windowed'
+CACHE_DIR = 'train_cache_v18_v19_idle_trans'  # Sử dụng thư mục cache của v25
+OUT_DIR = 'train_v26_v3_kq'
 CLASS_NAMES = ['Walk', 'Run', 'Idle', 'Trans', 'Fall']
 
-# Khởi tạo Pipeline v26
+# Khởi tạo Pipeline
 preprocessor = DataPreprocessor(DATA_DIR, CACHE_DIR, CLASS_NAMES)
 reporter = OutputReporter(OUT_DIR, CLASS_NAMES)
 
-# Nạp và Tiền xử lý dữ liệu
+# Nạp và Tiền xử lý dữ liệu (từ Cache cũ)
 X_train, y_train, X_val, y_val, X_test, y_test = preprocessor.load_or_create_dataset()
 X_train, X_val, X_test = preprocessor.apply_preprocessing(X_train, X_val, X_test)
-class_weights = preprocessor.get_balanced_class_weights(y_train)
 
 # --- KIẾN TRÚC MÔ HÌNH ResNet-1D v26 TỐI ƯU ESP-NN ---
 def se_block_v26(inputs, filters):
@@ -91,14 +92,14 @@ model.summary()
 focal_loss = tf.keras.losses.CategoricalFocalCrossentropy(gamma=2.0)
 
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0005),
     loss=focal_loss,
     metrics=['accuracy']
 )
 
 # Callbacks
 callbacks = [
-    tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(OUT_DIR, 'best_model_v26.keras'), monitor='val_loss', save_best_only=True),
+    tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(OUT_DIR, 'best_model_v26_v3.keras'), monitor='val_loss', save_best_only=True),
     tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True),
     tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5)
 ]
@@ -107,20 +108,19 @@ callbacks = [
 y_train_oh = tf.keras.utils.to_categorical(y_train, num_classes=len(CLASS_NAMES))
 y_val_oh = tf.keras.utils.to_categorical(y_val, num_classes=len(CLASS_NAMES))
 
-print("\n[*] Bắt đầu huấn luyện mô hình v26...")
+print("\n[*] Bắt đầu huấn luyện mô hình v26_v3...")
 history = model.fit(
     X_train, y_train_oh,
     validation_data=(X_val, y_val_oh),
     epochs=100,
     batch_size=256,
-    class_weight=class_weights,
     callbacks=callbacks
 )
 
 # Đánh giá & Báo cáo
-reporter.plot_training_history(history, version='v26')
+reporter.plot_training_history(history, version='v26_v3')
 
 # Chú ý: Evaluate cần nhãn gốc (không one-hot)
-model.load_weights(os.path.join(OUT_DIR, 'best_model_v26.keras'))
-reporter.evaluate_and_report(model, X_test, y_test, version='v26')
-print("\n[*] Quá trình huấn luyện v26 hoàn tất!")
+model.load_weights(os.path.join(OUT_DIR, 'best_model_v26_v3.keras'))
+reporter.evaluate_and_report(model, X_test, y_test, version='v26_v3', fall_threshold=0.25)
+print("\n[*] Quá trình huấn luyện v26_v3 hoàn tất!")

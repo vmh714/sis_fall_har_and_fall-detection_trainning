@@ -88,6 +88,12 @@ class DataPreprocessor:
                         augmented_data = data * scale_factor
                         X_train_list.append(augmented_data)
                         y_train_list.append(label)
+                    # --- Data Augmentation riêng cho lớp Idle (Jittering) ---
+                    elif self.class_names[label] == 'Idle':
+                        jitter = np.random.normal(0, 0.05, data.shape)
+                        augmented_data = data + jitter
+                        X_train_list.append(augmented_data)
+                        y_train_list.append(label)
                 elif subject_id in self.VAL_SUBJECTS:
                     X_val_list.append(data)
                     y_val_list.append(label)

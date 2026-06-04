@@ -12,8 +12,8 @@ sys.path.append(str(CURRENT_DIR))
 from ml_pipeline_v26 import DataPreprocessor, OutputReporter
 # Cấu hình
 DATA_DIR = 'SisFall_dataset_Windowed'
-CACHE_DIR = 'train_cache_v26'  # Sử dụng thư mục cache mới cho v26
-OUT_DIR = 'train_v26_kq'
+CACHE_DIR = 'train_cache_v26_v2'  # Sử dụng thư mục cache mới cho v26_v2
+OUT_DIR = 'train_v26_v2_kq'
 CLASS_NAMES = ['Walk', 'Run', 'Idle', 'Trans', 'Fall']
 
 # Khởi tạo Pipeline v26
@@ -91,14 +91,14 @@ model.summary()
 focal_loss = tf.keras.losses.CategoricalFocalCrossentropy(gamma=2.0)
 
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0005),
     loss=focal_loss,
     metrics=['accuracy']
 )
 
 # Callbacks
 callbacks = [
-    tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(OUT_DIR, 'best_model_v26.keras'), monitor='val_loss', save_best_only=True),
+    tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(OUT_DIR, 'best_model_v26_v2.keras'), monitor='val_loss', save_best_only=True),
     tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True),
     tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5)
 ]
@@ -107,20 +107,19 @@ callbacks = [
 y_train_oh = tf.keras.utils.to_categorical(y_train, num_classes=len(CLASS_NAMES))
 y_val_oh = tf.keras.utils.to_categorical(y_val, num_classes=len(CLASS_NAMES))
 
-print("\n[*] Bắt đầu huấn luyện mô hình v26...")
+print("\n[*] Bắt đầu huấn luyện mô hình v26_v2...")
 history = model.fit(
     X_train, y_train_oh,
     validation_data=(X_val, y_val_oh),
     epochs=100,
     batch_size=256,
-    class_weight=class_weights,
     callbacks=callbacks
 )
 
 # Đánh giá & Báo cáo
-reporter.plot_training_history(history, version='v26')
+reporter.plot_training_history(history, version='v26_v2')
 
 # Chú ý: Evaluate cần nhãn gốc (không one-hot)
-model.load_weights(os.path.join(OUT_DIR, 'best_model_v26.keras'))
-reporter.evaluate_and_report(model, X_test, y_test, version='v26')
-print("\n[*] Quá trình huấn luyện v26 hoàn tất!")
+model.load_weights(os.path.join(OUT_DIR, 'best_model_v26_v2.keras'))
+reporter.evaluate_and_report(model, X_test, y_test, version='v26_v2')
+print("\n[*] Quá trình huấn luyện v26_v2 hoàn tất!")
