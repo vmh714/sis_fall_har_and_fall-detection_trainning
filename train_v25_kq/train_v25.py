@@ -1,13 +1,39 @@
 import os
+import sys
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Conv1D, SeparableConv1D, BatchNormalization, Activation, Multiply, Add, GlobalAveragePooling1D, GlobalMaxPooling1D, Concatenate, Dropout, Dense
+from tensorflow.keras.layers import Input, Conv1D, SeparableConv1D, BatchNormalization, Activation, Multiply, Add, GlobalAveragePooling1D, GlobalMaxPooling1D, Concatenate, Dropout, Dense, Reshape
 from tensorflow.keras.models import Model
 from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
+from tensorflow.keras.utils import to_categorical
+from pathlib import Path
+
+# Add project root to sys.path to import ml_pipeline
+CURRENT_DIR = Path(__file__).resolve().parent.parent
+sys.path.append(str(CURRENT_DIR))
+from ml_pipeline import DataPreprocessor, OutputReporter
+
+tf.keras.backend.set_floatx('float32')
+
+class FallDetectionTrainerV25(DataPreprocessor, OutputReporter):
+    """Lớp quản lý luồng huấn luyện cho v25, kế thừa Logic xử lý Data và Output"""
+    def __init__(self):
+        # Đường dẫn cấu hình
+        data_dir = CURRENT_DIR / 'tool_for_new_dataset' / 'SisFall_dataset_Windowed'
+        cache_dir = CURRENT_DIR / 'train_cache_v18_v19_idle_trans'
+        out_dir = CURRENT_DIR / 'train_v25_kq'
+        class_names = ['Walk', 'Run', 'Idle', 'Trans', 'Fall']
+        
+        # Khởi tạo 2 class cha
+        DataPreprocessor.__init__(self, data_dir, cache_dir, class_names)
+        OutputReporter.__init__(self, out_dir, class_names)
+        
+        self.version = "v25"
 
 def se_block_v25(x, c, ratio=4):
     """SE Block tối ưu hóa hoàn toàn bằng Conv1D 1x1 (Pointwise) cho ESP-NN"""
-    se = tf.reduce_mean(x, axis=1, keepdims=True)
+    se = GlobalAveragePooling1D()(x)
+    se = Reshape((1, c))(se)
     # Tăng tốc pointwise 14.2x
     se = Conv1D(c // ratio, kernel_size=1, use_bias=False)(se)
     se = Activation('relu6')(se) # Tăng tốc 11.5x
@@ -81,60 +107,52 @@ def build_resnet1d_v25(input_shape=(200, 6), n_classes=5):
     )
     return model
 
-def get_class_weights():
-    # Điều chỉnh class weight dựa trên phân tích báo cáo tập test
-    # Mục tiêu: Đẩy mạnh Fall và Trans, giảm Idle
-    # Lớp Idle (dữ liệu nhiều nhất) có trọng số thấp nhất. Lớp Fall (dữ liệu ít nhất, quan trọng nhất) có trọng số cao nhất.
-    # Note: Chỉnh sửa lại index tương ứng với Label Encoder trong code thực tế của bạn.
-    # Giả sử: 0: Walk, 1: Run, 2: Idle, 3: Trans, 4: Fall
-    return {
-        0: 1.0,  # Walk
-        1: 1.0,  # Run
-        2: 0.5,  # Idle (Chiếm 40% dataset, penalty thấp)
-        3: 2.0,  # Trans (Cần nâng precision, chống nhầm lẫn với Idle)
-        4: 3.5   # Fall (Chỉ chiếm ~8% dataset, penalty cực cao để đảm bảo Recall)
-    }
-
-if __name__ == "__main__":
-    print("Khởi tạo mô hình ResNet-1D v25...")
-    model = build_resnet1d_v25(input_shape=(200, 6), n_classes=5)
+def main():
+    trainer = FallDetectionTrainerV25()
+    
+    # 1. Nạp và tiền xử lý dữ liệu
+    X_train, y_train, X_val, y_val, X_test, y_test = trainer.load_or_create_dataset()
+    X_train, X_val, X_test = trainer.apply_preprocessing(X_train, X_val, X_test)
+    
+    # 2. Tính toán class weights (Do đã dùng 'balanced' nên tự động cân bằng số lượng, 
+    # chỉ cần đẩy nhẹ Fall lên để ưu tiên recall, không nên phạt Idle hay nhân đôi Trans nữa)
+    weight_modifiers = {'Fall': 3.0, 'Trans': 1.0, 'Idle': 1.0}
+    class_weights = trainer.get_balanced_class_weights(y_train, weight_modifiers)
+    
+    # 3. One-hot encoding
+    y_train_oh = to_categorical(y_train, num_classes=len(trainer.class_names))
+    y_val_oh = to_categorical(y_val, num_classes=len(trainer.class_names))
+    
+    # 4. Khởi tạo mô hình
+    input_shape = (X_train.shape[1], X_train.shape[2])
+    print(f"Khởi tạo mô hình ResNet-1D {trainer.version}...")
+    model = build_resnet1d_v25(input_shape, n_classes=len(trainer.class_names))
     model.summary()
-
-    # (Optional) Chỗ này load dữ liệu thật của bạn
-    # X_train, y_train, X_val, y_val = load_your_data()
     
-    # Ví dụ Callbacks
-    checkpoint = ModelCheckpoint(
-        'best_resnet1d_v25.keras', 
-        monitor='val_accuracy', 
-        save_best_only=True, 
-        mode='max',
-        verbose=1
-    )
+    # 5. Huấn luyện mô hình
+    checkpoint_path = trainer.out_dir / f'best_model_{trainer.version}.keras'
+    callbacks = [
+        EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True, verbose=1),
+        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6, verbose=1),
+        ModelCheckpoint(filepath=str(checkpoint_path), monitor='val_loss', save_best_only=True, verbose=1)
+    ]
     
-    reduce_lr = ReduceLROnPlateau(
-        monitor='val_loss', 
-        factor=0.5, 
-        patience=5, 
-        min_lr=1e-5,
-        verbose=1
-    )
-    
-    early_stopping = EarlyStopping(
-        monitor='val_loss',
-        patience=15,
-        restore_best_weights=True
-    )
-    
-    # Ví dụ Training function call (Commented out để không báo lỗi khi chạy thử)
-    """
+    print(f"\\n[*] Bắt đầu huấn luyện mô hình ResNet-1D {trainer.version}...")
     history = model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val),
+        X_train, y_train_oh,
+        validation_data=(X_val, y_val_oh),
         epochs=100,
         batch_size=64,
-        class_weight=get_class_weights(),  # <--- Bắt buộc dùng Class Weights
-        callbacks=[checkpoint, reduce_lr, early_stopping]
+        class_weight=class_weights,
+        callbacks=callbacks,
+        verbose=2 
     )
-    """
-    print("Script khởi tạo kiến trúc thành công! Hãy nạp dữ liệu và tiến hành huấn luyện.")
+    
+    # 6. Đánh giá và báo cáo
+    trainer.plot_training_history(history, version=trainer.version)
+    
+    best_model = tf.keras.models.load_model(str(checkpoint_path))
+    trainer.evaluate_and_report(best_model, X_test, y_test, version=trainer.version, fall_threshold=0.25)
+
+if __name__ == '__main__':
+    main()
