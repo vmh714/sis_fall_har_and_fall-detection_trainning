@@ -4,7 +4,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h" // Thêm thư viện để cấp phát PSRAM
-//#include <math.h>
+#include <math.h>
 
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -24,21 +24,21 @@ namespace {
     // Tăng kích thước lên 1MB
     constexpr int kTensorArenaSize = 100 * 1024;
     
-    //uint8_t tensor_arena[kTensorArenaSize];
-    //Đổi từ mảng tĩnh sang con trỏ để cấp phát động
-    uint8_t* tensor_arena = nullptr;
+    uint8_t tensor_arena[kTensorArenaSize];
+    // Đổi từ mảng tĩnh sang con trỏ để cấp phát động
+    //uint8_t* tensor_arena = nullptr;
 }  // namespace
 
 int tflite_init(void) {
     tflite::InitializeTarget();
 
-    //1. Cấp phát Tensor Arena vào PSRAM
-    tensor_arena = (uint8_t*)heap_caps_malloc(kTensorArenaSize, MALLOC_CAP_SPIRAM);
-    if (tensor_arena == nullptr) {
-        ESP_LOGE(TAG, "Lỗi: Không thể cấp phát %d bytes trên PSRAM!", kTensorArenaSize);
-        return -1;
-    }
-    ESP_LOGI(TAG, "Đã cấp phát thành công %d bytes trên PSRAM.", kTensorArenaSize);
+    // 1. Cấp phát Tensor Arena vào PSRAM
+    // tensor_arena = (uint8_t*)heap_caps_malloc(kTensorArenaSize, MALLOC_CAP_SPIRAM);
+    // if (tensor_arena == nullptr) {
+    //     ESP_LOGE(TAG, "Lỗi: Không thể cấp phát %d bytes trên PSRAM!", kTensorArenaSize);
+    //     return -1;
+    // }
+    // ESP_LOGI(TAG, "Đã cấp phát thành công %d bytes trên PSRAM.", kTensorArenaSize);
 
     // 2. Load mô hình
     model = tflite::GetModel(g_model_data);
@@ -118,7 +118,7 @@ int tflite_init(void) {
     // In ra lượng RAM thực tế yêu cầu
     ESP_LOGI(TAG, "================================================");
     ESP_LOGI(TAG, "TFLITE ARENA CALCULATION RESULTS:");
-    ESP_LOGI(TAG, "Total Arena Size Configured: %d bytes (PSRAM)", kTensorArenaSize);
+    ESP_LOGI(TAG, "Total Arena Size Configured: %d bytes (SRAM)", kTensorArenaSize);
     ESP_LOGI(TAG, "Actual Arena Used: %d bytes", (int)interpreter->arena_used_bytes());
     ESP_LOGI(TAG, "================================================");
 
@@ -195,19 +195,6 @@ void tflite_run_inference_with_data(float* rx_data, size_t num_bytes) {
     if (input->type == kTfLiteInt8) {
         for (int i = 0; i < elements; i++) {
             float val = rx_data[i];
-
-            int feature_idx = i % 6; 
-            
-            if (feature_idx < 3) {
-                // Xử lý Accel: Kẹp giới hạn -8.0g đến 8.0g rồi scale
-                if (val > 8.0f) val = 8.0f;
-                if (val < -8.0f) val = -8.0f;
-                val = val / 8.0f;
-            } else {
-                // Xử lý Gyro: Scale theo 2000 dps
-                val = val / 2000.0f;
-            }
-
             int32_t quantized_val = round(val / input->params.scale) + input->params.zero_point;
             // Kẹp (Clamp) giá trị vào giới hạn int8_t
             if (quantized_val > 127) quantized_val = 127;
@@ -272,19 +259,20 @@ void tflite_run_inference_with_data(float* rx_data, size_t num_bytes) {
     bool posture_computed = false;
 
     if (predicted_class == IDLE_CLASS_INDEX) {
-        double sum_y_sq = 0.0f;
-        double sum_xz_sq = 0.0f;
+        // Chỉ tính toán căn bậc 2 khi thực sự cần thiết để tiết kiệm CPU
+        float sum_y = 0.0f;
+        float sum_xz = 0.0f;
         int num_samples = num_bytes / (6 * sizeof(float)); // Thường là 200
         for (int i = 0; i < num_samples; i++) {
             float ax = rx_data[i * 6 + 0];
             float ay = rx_data[i * 6 + 1];
             float az = rx_data[i * 6 + 2];
             
-            
-            sum_y_sq += (ay * ay);
-            sum_xz_sq += (ax * ax + az * az);
+            float abs_y = ay > 0 ? ay : -ay;
+            sum_y += abs_y;
+            sum_xz += sqrtf(ax * ax + az * az);
         }
-        is_stand_sit = (sum_y_sq > sum_xz_sq);
+        is_stand_sit = (sum_y > sum_xz);
         posture_computed = true;
     }
 

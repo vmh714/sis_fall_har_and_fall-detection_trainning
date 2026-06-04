@@ -4,7 +4,7 @@
 """
 Script kết hợp:
 1. Bắn dữ liệu (Inference via UART) xuống ESP32.
-2. Tự động đánh giá hiệu năng (Performance Evaluation) của model TCN v23 (5 lớp) ngay sau khi chạy xong.
+2. Tự động đánh giá hiệu năng (Performance Evaluation) của model TCN v24 (5 lớp) ngay sau khi chạy xong.
 3. Tự động kiểm tra và cài đặt thư viện còn thiếu (pyserial, pandas, numpy, matplotlib, seaborn, scikit-learn).
 4. Hỗ trợ chế độ `--eval-only` để chỉ đánh giá trên file CSV có sẵn mà không cần UART.
 """
@@ -209,7 +209,7 @@ def run_evaluation(csv_path):
     print(f"\n[*] Đang đọc dữ liệu từ '{csv_path}' để tiến hành đánh giá hiệu năng...")
     df = pd.read_csv(csv_path)
     
-    # 5 lớp chuyên biệt theo TCN v23
+    # 5 lớp chuyên biệt theo TCN v24
     CLASS_NAMES = ['Walk', 'Run', 'Idle', 'Trans', 'Fall']
     
     # Ánh xạ nhãn thực tế (Expected_Class) từ CSV về 5 lớp
@@ -257,7 +257,7 @@ def run_evaluation(csv_path):
     
     # Tạo chuỗi báo cáo
     report_str = "\n" + "="*50 + "\n"
-    report_str += "BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - TCN v23 (5 Lớp)\n"
+    report_str += "BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - TCN v24 (5 Lớp)\n"
     report_str += f"Dựa trên file: {csv_path}\n"
     report_str += "="*50 + "\n"
     
@@ -284,17 +284,17 @@ def run_evaluation(csv_path):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Đường dẫn file đầu ra chính
-    out_txt_path = os.path.join(base_dir, "report_v23_firmware.txt")
-    out_img_path = os.path.join(base_dir, "confusion_matrix_v23_firmware.png")
+    out_txt_path = os.path.join(base_dir, "report_v24_firmware.txt")
+    out_img_path = os.path.join(base_dir, "confusion_matrix_v24_firmware.png")
     
     with open(out_txt_path, 'w', encoding='utf-8') as rf:
         rf.write(report_str)
     print(f"[+] Đã lưu báo cáo chi tiết vào file: '{out_txt_path}'")
     
-    # Đồng thời lưu vào train_v23_kq nếu thư mục đó tồn tại
-    train_kq_dir = os.path.join(base_dir, "train_v23_kq")
+    # Đồng thời lưu vào train_v24_kq nếu thư mục đó tồn tại
+    train_kq_dir = os.path.join(base_dir, "train_v24_kq")
     if os.path.exists(train_kq_dir):
-        out_txt_path_kq = os.path.join(train_kq_dir, "report_v23_firmware.txt")
+        out_txt_path_kq = os.path.join(train_kq_dir, "report_v24_firmware.txt")
         with open(out_txt_path_kq, 'w', encoding='utf-8') as rf:
             rf.write(report_str)
         print(f"[+] Đã lưu bản sao báo cáo chi tiết vào: '{out_txt_path_kq}'")
@@ -305,7 +305,7 @@ def run_evaluation(csv_path):
                 xticklabels=CLASS_NAMES, yticklabels=CLASS_NAMES,
                 annot_kws={"size": 14, "weight": "bold"})
     
-    plt.title('Confusion Matrix - TCN v23 on Firmware (5 Classes)', fontsize=14, fontweight='bold', pad=15)
+    plt.title('Confusion Matrix - TCN v24 on Firmware (5 Classes)', fontsize=14, fontweight='bold', pad=15)
     plt.ylabel('Nhãn Thực Tế (Ground Truth)', fontsize=12, fontweight='bold')
     plt.xlabel('Nhãn Dự Đoán (Firmware Predict)', fontsize=12, fontweight='bold')
     
@@ -316,9 +316,9 @@ def run_evaluation(csv_path):
     plt.savefig(out_img_path, dpi=300)
     print(f"[+] Đã vẽ và lưu ma trận nhầm lẫn thành file: '{out_img_path}'")
     
-    # Đồng thời lưu vào train_v23_kq nếu thư mục đó tồn tại
+    # Đồng thời lưu vào train_v24_kq nếu thư mục đó tồn tại
     if os.path.exists(train_kq_dir):
-        out_img_path_kq = os.path.join(train_kq_dir, "confusion_matrix_v23_firmware.png")
+        out_img_path_kq = os.path.join(train_kq_dir, "confusion_matrix_v24_firmware.png")
         plt.savefig(out_img_path_kq, dpi=300)
         print(f"[+] Đã lưu bản sao ma trận nhầm lẫn vào: '{out_img_path_kq}'")
         
@@ -336,7 +336,7 @@ if __name__ == "__main__":
     print("Để thoát khỏi trạng thái đóng băng, hãy bấm phím ESC hoặc Enter.")
     print("="*60 + "\n")
 
-    parser = argparse.ArgumentParser(description="Tool bắn dữ liệu inference xuống ESP32 và tự động đánh giá hiệu năng TCN v23")
+    parser = argparse.ArgumentParser(description="Tool bắn dữ liệu inference xuống ESP32 và tự động đánh giá hiệu năng TCN v24")
     parser.add_argument("--file", "-f", type=str, help="Đường dẫn đến 1 file CSV")
     parser.add_argument("--folder", "-d", type=str, default="SisFall_dataset_Windowed", help="Thư mục chứa file CSV (mặc định: SisFall_dataset_Windowed)")
     parser.add_argument("--samples", "-n", type=int, default=100, help="Số lượng file muốn bốc bừa CHO MỖI NHÃN")

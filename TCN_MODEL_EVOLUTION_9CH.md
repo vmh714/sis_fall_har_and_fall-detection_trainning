@@ -47,27 +47,49 @@ Mục tiêu tối thượng là đạt Recall > 95% cho lớp Fall (tiêu chuẩ
 
 ---
 
-## 3. 🚨 Plot Twist Định Mệnh: Khủng Hoảng "Per-Tensor Quantization" Trên Firmware
+## 3. 🚨 Case Study: "Lệch pha tiền xử lý dữ liệu dẫn đến tràn số khi lượng tử hóa INT8"
 
-Mặc dù mô hình v14/v23 Float32 trên Keras cho kết quả vượt trội, nhưng khi ép kiểu xuống INT8 (Quantization) để nạp vào Firmware ESP32, độ chính xác bất ngờ **tuột dốc không phanh** (Lớp Walk và Run gần như "tê liệt", mô hình mù quáng dự đoán sai sang Fall/Idle).
+Để đưa vào cuốn thuyết minh khóa luận hoặc trình bày trước hội đồng bảo vệ, đây là cách đóng gói lỗi kinh điển này một cách học thuật và chuyên nghiệp theo cấu trúc "Vấn đề - Nguyên nhân - Giải pháp".
 
-**Nguyên nhân cốt lõi (Lỗi kinh điển trong Edge AI):**
-- Theo đặc tả phần cứng (`Readme.txt`), gia tốc kế (ADXL345) có dải đo `±16g` nhưng biên độ thực tế của bộ dữ liệu chủ yếu dao động cực hẹp **`[-1.6 : 0.4]`**. Ngược lại, con quay hồi chuyển (ITG3200) có dải đo khổng lồ `±2000°/s`, biên độ ghi nhận tới **`[-65 : 65]`**.
-- Khi TensorFlow Lite nén mô hình sang INT8, lớp dữ liệu đầu vào (Input Tensor) bắt buộc phải dùng cơ chế **Per-Tensor Quantization** (Nghĩa là dùng chung 1 hệ số chia Scale cho TOÀN BỘ 6 trục).
-- Do dải phân bố của Gyro quá lớn (`[-65 : 65]`), TFLite quét và tính toán ra bước nhảy (Resolution) cho số nguyên INT8 là `~0.5` cho mỗi bậc. Với bước nhảy này, toàn bộ dải tín hiệu gia tốc vi mô của các hành động bước đi (vốn chỉ dao động `0.1` đến `0.4`) lập tức bị chia tỷ lệ và làm tròn tịt ngòi về **`0`**. Mô hình trên vi điều khiển bị "mù" hoàn toàn cảm biến gia tốc, mất phương hướng và dẫn đến việc phân loại sai trầm trọng.
+### 3.1. Tên lỗi học thuật (Technical Term)
+**"Lệch pha tiền xử lý dữ liệu dẫn đến tràn số khi lượng tử hóa INT8"** *(Preprocessing Mismatch causing INT8 Quantization Saturation)*
 
-**Giải Pháp Vàng (Global Min-Max Scaling):**
-- Áp dụng chuẩn hóa vĩ mô bằng cách **chia dữ liệu thô cho hệ số đo tối đa (Max Range) của chính IMU** ngay từ bước tiền xử lý (Pre-processing) trước khi đưa vào Keras. (Ví dụ: `Accel / 2.0` và `Gyro / 250.0`).
-- Phương pháp này mang cả 6 trục về chung một hệ quy chiếu biên độ `[-1.0 : 1.0]`. Nhờ đó, hệ số Scale của INT8 được nén xuống cực kỳ mịn (chỉ `~0.0078`). Toàn bộ những đường cong tinh tế của tín hiệu gia tốc kế được bảo toàn nguyên vẹn 100%, cứu sống hoàn toàn độ chính xác của mô hình trên phần cứng nhúng!
+### 3.2. Biểu hiện (Symptom)
+* **Trên PC (Mô phỏng Float32):** Mô hình đạt độ chính xác cực cao (Accuracy > 91%), nhận diện xuất sắc cả 5 lớp hành vi.
+* **Trên Firmware ESP32-S3 (Bản cũ - Trước khi xử lý):** Độ chính xác sụt giảm nghiêm trọng. Hệ thống phân loại mất kiểm soát, mô hình dường như chỉ đang "đoán mò".
+  - **Độ chính xác tổng (Accuracy):** Rớt thảm hại chỉ còn **39.83%**.
+  - **Hành vi đi bộ (Walk):** Bị xóa sổ hoàn toàn (Precision 15.46%, Recall 15.00%).
+  - **Nhận diện té ngã (Fall Recall):** Chỉ đạt **67.00%**, tỷ lệ sai số trầm trọng gây nguy hiểm tính mạng nếu triển khai thực tế.
+
+### 3.3. Nguyên nhân gốc rễ (Root Cause)
+Lỗi xảy ra do sự bất đồng bộ trong Data Pipeline giữa môi trường huấn luyện (Python) và môi trường thực thi (C/C++ trên RTOS):
+* **Bản chất lượng tử hóa (Quantization):** Khi chuyển đổi mô hình từ Float32 sang INT8 (Post-Training Quantization), TFLite tính toán các tham số `scale` và `zero_point` dựa trên phân phối của dữ liệu huấn luyện. Dữ liệu này đã được chuẩn hóa về một khoảng biên độ rất hẹp (kẹp trong khoảng `±8.0` rồi chia tỷ lệ để xoay quanh mốc `[-1, 1]`). Lớp dữ liệu đầu vào (Input Tensor) bắt buộc phải dùng cơ chế **Per-Tensor Quantization** (dùng chung 1 hệ số Scale cực nhỏ `~0.0078` cho TOÀN BỘ 6 trục).
+* **Thiếu hụt tiền xử lý trên Firmware:** Khi đưa vào chạy thực tế, vi điều khiển nhận luồng dữ liệu thô (raw data) có biên độ khổng lồ. Gia tốc kế (ADXL345) có dải đo `±16g`, con quay hồi chuyển (ITG3200) có dải đo tới `±2000°/s`.
+* **Hiện tượng Tràn số (Saturation):** Khi đưa các giá trị thô khổng lồ này vào công thức ép kiểu: `round(raw_value / scale) + zero_point`, kết quả trả ra vượt quá xa giới hạn của kiểu dữ liệu 8-bit có dấu. Toàn bộ mảng đặc trưng bị kẹp cứng (clamped) ở hai giá trị biên là `-128` hoặc `127`. Tín hiệu động lực học của cảm biến bị "phẳng hóa" hoàn toàn, khiến mô hình bị mù thông tin đặc trưng (feature loss).
+
+### 3.4. Giải pháp khắc phục (Resolution)
+Tái tạo chính xác chu trình chuẩn hóa dữ liệu (Global Min-Max Scaling) ngay bên trong Firmware vi điều khiển trước khi đưa vào Node đầu vào của TFLite Micro. Cụ thể:
+1. **Phân tách luồng xử lý:** Tách rõ ràng các trục của Gia tốc kế (Accel) và Con quay hồi chuyển (Gyro) trong mảng dữ liệu C++.
+2. **Kẹp giới hạn phần cứng (Clipping):** Kẹp giới hạn cho Accel ở mức `±8.0g` để mô phỏng sự quá tải phần cứng khi va chạm mạnh.
+3. **Phép chia tỷ lệ:** Thực hiện chia tỷ lệ (chia 8.0 cho Accel và chia 2000.0 cho Gyro) trên kiểu dữ liệu số thực (Float) để gộp cả 6 trục về chung một hệ quy chiếu biên độ `[-1.0 : 1.0]` trước khi lượng tử hóa INT8.
+
+### 3.5. Kết Cục Của Case Study: Sự Vươn Mình Ngoạn Mục
+Sau khi cấy giải pháp tiền xử lý này trực tiếp vào `tflite_wrapper.cpp`, mô hình bản **v24** trên Firmware đã ghi nhận sự lột xác thần kỳ:
+- **Độ chính xác tổng (Accuracy):** Nhảy vọt lên **91.17%**, đồng nhất hoàn hảo với kết quả Float32 ban đầu trên máy tính.
+- **Hành vi đi bộ (Walk):** Phục hồi ngoạn mục với F1-Score **90.72%**.
+- **💥 Lớp Té Ngã (Fall):** Đạt ngưỡng **TỐI ĐA THẦN THÁNH - Precision: 100% | Recall: 100%**. 
+=> *Tuyệt đối không bỏ sót một cú ngã nào, và hoàn toàn triệt tiêu báo động giả (Zero False Positives).*
+
+**Bài học đắt giá:** Lịch sử tiến hóa của case study này là minh chứng hoàn hảo cho triết lý: **Trong TinyML, việc thấu hiểu ranh giới vật lý của cảm biến (Sensor Physical Limits) và đồng bộ Data Pipeline quan trọng ngang ngửa với việc thiết kế kiến trúc Deep Learning.**
 
 ---
 
-## 4. Chiến Lược Triển Khai Thực Tế (MCU / C++)
+## 5. Chiến Lược Triển Khai Thực Tế (MCU / C++)
 
 Dựa trên chuỗi thực nghiệm toàn diện với tập dữ liệu chuẩn 9 kênh (Không la bàn) và khắc phục thành công yếu điểm Quantization, chúng ta thống nhất hệ thống phần mềm nhúng để cài đặt lên thiết bị đeo (Wearable) như sau:
 
 > [!IMPORTANT]  
-> **Chốt sổ Kiến trúc & Trọng số:** Sử dụng cấu hình và tệp trọng số `.keras` / `.tflite` của phiên bản **v14/v23**. Đảm bảo dữ liệu đã được chia theo tỷ lệ vĩ mô (Max Range Scaling) trước khi Inference.
+> **Chốt sổ Kiến trúc & Trọng số:** Sử dụng cấu hình và tệp trọng số `.keras` / `.tflite` của phiên bản **v24**. Đảm bảo thuật toán chia tỷ lệ biên độ (Max Range Scaling) đã được hard-code vào hàm inference C++.
 
 > [!TIP]  
 > **Kỹ Thuật Hậu Xử Lý (Post-Processing) Bắt Buộc:**

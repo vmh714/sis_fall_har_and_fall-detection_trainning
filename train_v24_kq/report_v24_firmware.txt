@@ -1,0 +1,25 @@
+- Tổng số mẫu test thành công: 1200
+- Thời gian Inference trung bình: 159.66 ms
+- Thời gian Inference Max/Min: 159.73 / 159.55 ms
+==================================================
+BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - TCN v24 (5 Lớp)
+Dựa trên file: D:\New folder\sis_fall_har_and_fall-detection_trainning\inference_results.csv
+==================================================
+              precision    recall  f1-score   support
+
+        Walk     0.9505    0.8650    0.9058       200
+         Run     0.9950    0.9900    0.9925       200
+        Idle     0.8971    0.8500    0.8729       400
+       Trans     0.7750    0.9300    0.8455       200
+        Fall     0.9950    0.9950    0.9950       200
+
+    accuracy                         0.9133      1200
+   macro avg     0.9225    0.9260    0.9223      1200
+weighted avg     0.9183    0.9133    0.9141      1200
+
+==================================================
+KẾT QUẢ ĐÁNH GIÁ CHUYÊN BIỆT LỚP TÉ NGÃ (FALL) TRÊN FIRMWARE:
+  - Số ca ngã thực tế: 200
+  - Số ca ngã phát hiện đúng: 199
+  - TỶ LỆ RECALL TÉ NGÃ (FIRMWARE): 99.50%
+==================================================
