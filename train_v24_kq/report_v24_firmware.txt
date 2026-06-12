@@ -1,6 +1,6 @@
 
 ==================================================
-BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - TCN v24 (5 Lớp)
+BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - ResNet-1D v24 (Conv1D + ReLU6) (5 Lớp)
 Dựa trên file: D:\New folder\sis_fall_har_and_fall-detection_trainning\inference_results.csv
 ==================================================
               precision    recall  f1-score   support

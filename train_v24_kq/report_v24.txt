@@ -1,6 +1,6 @@
 
 ==================================================
-BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ - TCN v24 (5 Lớp - Threshold 0.25)
+BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ - ResNet-1D v24 (Conv1D + ReLU6) (5 Lớp - Threshold 0.25)
 ==================================================
               precision    recall  f1-score   support
 
