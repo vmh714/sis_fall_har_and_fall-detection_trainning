@@ -16,18 +16,18 @@ from ml_pipeline import DataPreprocessor, OutputReporter
 tf.keras.backend.set_floatx('float32')
 
 
-class FallDetectionTrainerV27(DataPreprocessor, OutputReporter):
+class FallDetectionTrainerV1FiveLabel(DataPreprocessor, OutputReporter):
     """CNN-LSTM baseline (kiến trúc v1) huấn luyện lại trên tập 5 nhãn"""
     def __init__(self):
         data_dir  = CURRENT_DIR / 'tool_for_new_dataset' / 'SisFall_dataset_Windowed'
         cache_dir = CURRENT_DIR / 'train_cache_v18_v19_idle_trans'
-        out_dir   = CURRENT_DIR / 'train_v27_cnn_lstm_kq'
+        out_dir   = CURRENT_DIR / 'train_v1_cnn_lstm_kq'
         class_names = ['Walk', 'Run', 'Idle', 'Trans', 'Fall']
 
         DataPreprocessor.__init__(self, data_dir, cache_dir, class_names)
         OutputReporter.__init__(self, out_dir, class_names)
 
-        self.version = 'v27'
+        self.version = 'v1'
 
 
 def build_cnn_lstm(input_shape=(200, 6), n_classes=5):
@@ -62,7 +62,7 @@ def build_cnn_lstm(input_shape=(200, 6), n_classes=5):
 
 
 def main():
-    trainer = FallDetectionTrainerV27()
+    trainer = FallDetectionTrainerV1FiveLabel()
 
     # 1. Nạp dữ liệu (dùng lại cache 5-nhãn của v25)
     X_train, y_train, X_val, y_val, X_test, y_test = trainer.load_or_create_dataset()
