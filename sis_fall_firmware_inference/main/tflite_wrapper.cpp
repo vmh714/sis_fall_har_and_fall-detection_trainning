@@ -48,23 +48,18 @@ int tflite_init(void) {
         return -1;
     }
 
-    // 3. Đăng ký các toán tử cần thiết cho model v25 (đã được trích xuất)
-    static tflite::MicroMutableOpResolver<15> resolver;
-    resolver.AddAdd();
-    resolver.AddConcatenation();
-    resolver.AddConv2D();
-    resolver.AddDepthwiseConv2D(); // Thêm op này để sửa lỗi DEPTHWISE_CONV_2D
-    resolver.AddExpandDims();
-    resolver.AddFullyConnected();
-    resolver.AddLogistic();
-    resolver.AddMean();
-    resolver.AddMul();
-    resolver.AddPack();
-    resolver.AddReduceMax();
-    resolver.AddReshape();
-    resolver.AddShape();
-    resolver.AddSoftmax();
-    resolver.AddStridedSlice();
+    // 3. Đăng ký đúng 7 op mà model_v1_int8.tflite dùng
+    //    (theo log "[*] Ops in model:" của export_tflite.py):
+    //    CONV_2D, FULLY_CONNECTED, MAX_POOL_2D, RESHAPE, SOFTMAX,
+    //    STRIDED_SLICE, UNIDIRECTIONAL_SEQUENCE_LSTM
+    static tflite::MicroMutableOpResolver<7> resolver;
+    resolver.AddConv2D();                      // Conv1D -> CONV_2D
+    resolver.AddMaxPool2D();                    // MaxPooling1D -> MAX_POOL_2D
+    resolver.AddUnidirectionalSequenceLSTM();   // 2x LSTM (đã fuse)
+    resolver.AddFullyConnected();              // 2x Dense
+    resolver.AddSoftmax();                      // softmax đầu ra
+    resolver.AddReshape();                      // RESHAPE
+    resolver.AddStridedSlice();                 // STRIDED_SLICE (quanh LSTM)
 
     // 4. Build Interpreter
     static tflite::MicroInterpreter static_interpreter(
