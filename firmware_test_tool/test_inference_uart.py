@@ -74,6 +74,62 @@ import re
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['axes.unicode_minus'] = False
 
+# ============================================================
+# CÁC PIPELINE DATA — mỗi model train theo pipeline khác nhau (windowed folder + ĐƠN VỊ GYRO khác).
+# Khi test PHẢI chọn đúng --pipeline khớp FIRMWARE đang flash, nếu không gyro sai đơn vị (rad/s vs dps,
+# lệch ~57x) -> model dự đoán sai (nhất là Trans). 'gen' = cách sinh ra windowed folder (cache) đó.
+# ============================================================
+PIPELINES = {
+    "v30": {
+        "folder": "SisFall_dataset_Windowed_v30",
+        "gyro_unit": "dps (raw*4000/65536, KHONG *pi/180)",
+        "firmware_norm": "accel clip(+-8g)/8 ; gyro clip(+-500 dps)/500",
+        "trans_cut": "su kien gyro rolling-RMS > 20 dps",
+        "models": "v30, v30_lstm32 (v31 4-kenh: firmware tu tinh gyro_mag tu 6 kenh CSV)",
+        "gen": "Chay cell windowing notebook train_v30 -> SisFall_dataset_Windowed_v30 (+ cache_v30)",
+    },
+    "resize": {
+        "folder": "SisFall_dataset_Windowed_new",
+        "gyro_unit": "rad/s (raw*4000/65536*pi/180)",
+        "firmware_norm": "accel clip(+-8g)/8 ; gyro /2000 (v29: /34.9)",
+        "trans_cut": "dinh accel SVM (cu)",
+        "models": "resize_64_32/32_16/32, v27, v28, v29",
+        "gen": "Chay cell windowing notebook resize_* -> SisFall_dataset_Windowed_new (+ cache_resize_64_32)",
+    },
+    "v3kf": {
+        "folder": "SisFall_dataset_Windowed_v3kf",
+        "gyro_unit": "dps + decimate (chong aliasing)",
+        "firmware_norm": "accel clip(+-8g)/8 ; gyro clip(+-500 dps)/500",
+        "trans_cut": "su kien gyro rolling-RMS > 20 dps",
+        "models": "KFold v3 (cross-population)",
+        "gen": "Chay cell windowing notebook SisFall_KFold_Experiments_v3 -> SisFall_dataset_Windowed_v3kf",
+    },
+    "v25": {
+        "folder": "tool_for_new_dataset/SisFall_dataset_Windowed",
+        "gyro_unit": "rad/s (cu)",
+        "firmware_norm": "gyro /2000 rad/s",
+        "trans_cut": "dinh accel + decimate + them D09/D10/D14",
+        "models": "v25 ResNet, v22 TCN",
+        "gen": "pipeline v25/v22 (decimate) -> tool_for_new_dataset/SisFall_dataset_Windowed",
+    },
+}
+
+def print_pipelines():
+    print("="*74)
+    print("CAC PIPELINE DATA  (chon bang --pipeline <ten>; PHAI khop firmware dang flash)")
+    print("="*74)
+    for name, p in PIPELINES.items():
+        print(f"\n[{name}]  folder = {p['folder']}")
+        print(f"   gyro_unit : {p['gyro_unit']}")
+        print(f"   firmware  : {p['firmware_norm']}")
+        print(f"   Trans cut : {p['trans_cut']}")
+        print(f"   models    : {p['models']}")
+        print(f"   gen cache : {p['gen']}")
+    print("\n" + "-"*74)
+    print("[!] CSV gyro phai DUNG don vi firmware mong doi. Gui nham folder -> gyro lech ~57x")
+    print("    -> model du doan sai. Folder windowed nao chua co thi chay cell windowing tuong ung.")
+    print("="*74)
+
 def get_class_from_filename(filename):
     basename = os.path.basename(filename)
     if basename.startswith('F'):
@@ -202,7 +258,7 @@ def send_sample_to_esp32(csv_path, ser):
     print("\n[LỖI] Timeout! ESP32 xử lý data xong nhưng không trả về JSON.")
     return None
 
-def run_evaluation(csv_path, arena_used=None):
+def run_evaluation(csv_path, arena_used=None, model_name="model"):
     if not os.path.exists(csv_path):
         print(f"\n[LỖI] Không tìm thấy file '{csv_path}' để đánh giá hiệu năng!")
         return
@@ -270,7 +326,7 @@ def run_evaluation(csv_path, arena_used=None):
 
     # Tạo chuỗi báo cáo
     report_str = "\n" + "="*50 + "\n"
-    report_str += "BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - v25 (ResNet-1D)\n"
+    report_str += f"BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - {model_name}\n"
     report_str += f"Dựa trên file: {csv_path}\n"
     report_str += f"- Tổng số mẫu test thành công: {total_samples}\n"
     report_str += time_info
@@ -300,8 +356,8 @@ def run_evaluation(csv_path, arena_used=None):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Đường dẫn file đầu ra chính
-    out_txt_path = os.path.join(base_dir, "report_v25_firmware.txt")
-    out_img_path = os.path.join(base_dir, "confusion_matrix_v25_firmware.png")
+    out_txt_path = os.path.join(base_dir, f"report_{model_name}_firmware.txt")
+    out_img_path = os.path.join(base_dir, f"confusion_matrix_{model_name}_firmware.png")
     
     with open(out_txt_path, 'w', encoding='utf-8') as rf:
         rf.write(report_str)
@@ -321,7 +377,7 @@ def run_evaluation(csv_path, arena_used=None):
                 xticklabels=CLASS_NAMES, yticklabels=CLASS_NAMES,
                 annot_kws={"size": 14, "weight": "bold"})
     
-    plt.title('Confusion Matrix - v25 on Firmware (5 Classes)', fontsize=14, fontweight='bold', pad=15)
+    plt.title(f'Confusion Matrix - {model_name} on Firmware (5 Classes)', fontsize=14, fontweight='bold', pad=15)
     plt.ylabel('Nhãn Thực Tế (Ground Truth)', fontsize=12, fontweight='bold')
     plt.xlabel('Nhãn Dự Đoán (Firmware Predict)', fontsize=12, fontweight='bold')
     
@@ -354,7 +410,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Tool bắn dữ liệu inference xuống ESP32 và tự động đánh giá hiệu năng v25")
     parser.add_argument("--file", "-f", type=str, help="Đường dẫn đến 1 file CSV")
-    parser.add_argument("--folder", "-d", type=str, default="SisFall_dataset_Windowed", help="Thư mục chứa file CSV (mặc định: SisFall_dataset_Windowed)")
+    parser.add_argument("--pipeline", type=str, default="v30", choices=list(PIPELINES.keys()),
+                        help="Chọn PIPELINE data khớp firmware đang flash (mặc định: v30). Xem --list-pipelines")
+    parser.add_argument("--list-pipelines", action="store_true", help="In bảng các pipeline data + cache cần gen rồi thoát")
+    parser.add_argument("--model-name", type=str, default=None, help="Tên model để đặt tên report (mặc định = tên pipeline)")
+    parser.add_argument("--folder", "-d", type=str, default=None, help="Thư mục CSV windowed (mặc định: tự lấy theo --pipeline)")
     parser.add_argument("--samples", "-n", type=int, default=100, help="Số lượng file muốn bốc bừa CHO MỖI NHÃN")
     parser.add_argument("--port", "-p", type=str, help="Cổng COM (ví dụ: COM3). Để trống sẽ TỰ ĐỘNG TÌM.")
     parser.add_argument("--baud", "-b", type=int, default=115200, help="Tốc độ Baudrate")
@@ -362,10 +422,28 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
+    # Liệt kê pipeline rồi thoát
+    if args.list_pipelines:
+        print_pipelines()
+        sys.exit(0)
+
+    # Phân giải pipeline -> folder + model_name
+    pcfg = PIPELINES[args.pipeline]
+    if args.folder is None:
+        args.folder = pcfg["folder"]
+    if args.model_name is None:
+        args.model_name = args.pipeline
+    print("="*74)
+    print(f"[*] PIPELINE = '{args.pipeline}'  ->  folder CSV = {args.folder}")
+    print(f"    gyro      : {pcfg['gyro_unit']}")
+    print(f"    firmware  : {pcfg['firmware_norm']}")
+    print(f"    [!] DAM BAO firmware dang flash dung pipeline nay (gyro dung don vi), neu khong se sai!")
+    print("="*74 + "\n")
+
     # Chế độ Eval-only
     if args.eval_only:
         print("\n[*] Đang chạy ở chế độ CHỈ ĐÁNH GIÁ (Eval-only)...")
-        run_evaluation(out_file)
+        run_evaluation(out_file, model_name=args.model_name)
         sys.exit(0)
     
     # --- TỰ ĐỘNG TÌM CỔNG COM ---
@@ -564,6 +642,6 @@ if __name__ == "__main__":
         print(df_results.head(5).to_string())
         
         # Tự động gọi run_evaluation
-        run_evaluation(out_file, arena_used=arena_used)
+        run_evaluation(out_file, arena_used=arena_used, model_name=args.model_name)
     else:
         print("Không có kết quả nào được trả về hợp lệ từ ESP32.")
