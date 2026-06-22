@@ -136,10 +136,8 @@ def get_class_from_filename(filename):
         return "Fall"
     elif "_Trans_" in basename:
         return "Transition"
-    elif "_StandSit_" in basename:
-        return "Idle_StandSit"
-    elif "_Lie_" in basename:
-        return "Idle_Lie"
+    elif "_StandSit_" in basename or "_Lie_" in basename:
+        return "Idle"
     elif basename.startswith(('D01', 'D02', 'D05', 'D06')):
         return "Walk"
     elif basename.startswith(('D03', 'D04')):
@@ -223,7 +221,7 @@ def send_sample_to_esp32(csv_path, ser):
     # --- 3. ĐỢI JSON TRẢ VỀ ---
     start_wait = time.time()
     buffer = ""
-    while time.time() - start_wait < 3:
+    while time.time() - start_wait < 10:  # Tăng timeout lên 10 giây vì TCN inference chậm
         time.sleep(0.05) 
         
         if ser.in_waiting > 0:
@@ -247,6 +245,9 @@ def send_sample_to_esp32(csv_path, ser):
                             "Expected_Class": expected_class,
                             "Time_us": data.get("time_us", 0),
                             "Is_Stand_Sit": data.get("is_stand_sit"),
+                            "Arena_Used": data.get("arena_used"),
+                            "Free_PSRAM": data.get("free_psram"),
+                            "Free_SRAM": data.get("free_sram"),
                             "Probs": data.get("probs", [])
                         }
                     except json.JSONDecodeError:
@@ -356,17 +357,29 @@ def run_evaluation(csv_path, arena_used=None, model_name="model"):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Đường dẫn file đầu ra chính
-    out_txt_path = os.path.join(base_dir, f"report_{model_name}_firmware.txt")
-    out_img_path = os.path.join(base_dir, f"confusion_matrix_{model_name}_firmware.png")
+    out_txt_path = os.path.join(base_dir, f"report_{model_name}_sram_firmware.txt")
+    out_img_path = os.path.join(base_dir, f"confusion_matrix_{model_name}_sram_firmware.png")
     
     with open(out_txt_path, 'w', encoding='utf-8') as rf:
         rf.write(report_str)
     print(f"[+] Đã lưu báo cáo chi tiết vào file: '{out_txt_path}'")
     
-    # Đồng thời lưu vào train_v25_kq nếu thư mục đó tồn tại
-    train_kq_dir = os.path.join(base_dir, "train_v25_kq")
-    if os.path.exists(train_kq_dir):
-        out_txt_path_kq = os.path.join(train_kq_dir, "report_v25_firmware.txt")
+    # Đồng thời lưu vào thư mục train tương ứng với model_name
+    possible_train_dirs = [
+        os.path.join(base_dir, "..", f"train_{model_name}"),
+        os.path.join(base_dir, "..", f"train_{model_name}_tcn"),
+        os.path.join(base_dir, "..", f"train_{model_name}_kq"),
+        os.path.join(base_dir, f"train_{model_name}_kq"),
+        os.path.join(base_dir, "..", "train_v30")
+    ]
+    train_kq_dir = None
+    for d in possible_train_dirs:
+        if os.path.exists(d):
+            train_kq_dir = d
+            break
+            
+    if train_kq_dir:
+        out_txt_path_kq = os.path.join(train_kq_dir, f"report_{model_name}_sram_firmware.txt")
         with open(out_txt_path_kq, 'w', encoding='utf-8') as rf:
             rf.write(report_str)
         print(f"[+] Đã lưu bản sao báo cáo chi tiết vào: '{out_txt_path_kq}'")
@@ -388,9 +401,9 @@ def run_evaluation(csv_path, arena_used=None, model_name="model"):
     plt.savefig(out_img_path, dpi=300)
     print(f"[+] Đã vẽ và lưu ma trận nhầm lẫn thành file: '{out_img_path}'")
     
-    # Đồng thời lưu vào train_v25_kq nếu thư mục đó tồn tại
-    if os.path.exists(train_kq_dir):
-        out_img_path_kq = os.path.join(train_kq_dir, "confusion_matrix_v25_firmware.png")
+    # Đồng thời lưu vào thư mục train tương ứng nếu tìm thấy
+    if train_kq_dir:
+        out_img_path_kq = os.path.join(train_kq_dir, f"confusion_matrix_{model_name}_sram_firmware.png")
         plt.savefig(out_img_path_kq, dpi=300)
         print(f"[+] Đã lưu bản sao ma trận nhầm lẫn vào: '{out_img_path_kq}'")
         
@@ -419,6 +432,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", "-p", type=str, help="Cổng COM (ví dụ: COM3). Để trống sẽ TỰ ĐỘNG TÌM.")
     parser.add_argument("--baud", "-b", type=int, default=115200, help="Tốc độ Baudrate")
     parser.add_argument("--eval-only", action="store_true", help="Chỉ chạy đánh giá hiệu năng từ file CSV có sẵn, không thực hiện bắn UART")
+    parser.add_argument("--native", action="store_true", help="Kích hoạt chế độ Native USB (cho ESP32-S3 cắm trực tiếp không qua chip UART)")
     
     args = parser.parse_args()
 
@@ -473,42 +487,49 @@ if __name__ == "__main__":
         ser = Serial(args.port, args.baud, timeout=0.1, write_timeout=3, rtscts=False, dsrdtr=False, xonxoff=False)
         print(f"Connected to {args.port} at {args.baud} bps\n")
 
-        # BẮT BUỘC phải có 2 dòng này để nhả chân EN/BOOT, nếu không ESP32 sẽ tịt ngòi (không boot)
-        ser.setDTR(False)
-        ser.setRTS(False)
+        if args.native:
+            # ESP32-S3 Native USB (USB CDC) bắt buộc DTR=True thì Windows mới cho phép đẩy dữ liệu (tránh Write Timeout)
+            ser.setDTR(True)
+            ser.setRTS(True)
+        else:
+            # BẮT BUỘC phải có 2 dòng này để nhả chân EN/BOOT cho các mạch dùng chip CP2102/CH340, nếu không ESP32 sẽ tịt ngòi
+            ser.setDTR(False)
+            ser.setRTS(False)
 
-        print("Đang chờ ESP32 khởi động và nạp TFLite Model...")
-        
-        # Đọc log boot cho đến khi thấy chữ "Waiting for Python tool"
-        boot_log_full = ""
-        ready = False
-        start_boot_wait = time.time()
-        while time.time() - start_boot_wait < 5: # Chờ tối đa 5 giây
-            if ser.in_waiting > 0:
-                chunk = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
-                boot_log_full += chunk
-                if "Waiting for Python tool" in boot_log_full:
-                    ready = True
-                    break
-            time.sleep(0.05)
-            
-        print("-" * 40)
-        print("[ESP32 BOOT LOG]:")
-        print(boot_log_full.strip())
-        print("-" * 40)
-        
-        # Lấy thông tin Tensor Arena từ log boot
         arena_used = None
-        arena_match = re.search(r"Actual Arena Used:\s*(\d+)\s*bytes", boot_log_full, re.IGNORECASE)
-        if arena_match:
-            arena_used = arena_match.group(1)
-        
-        if not ready:
-            print("\n[!] QUÁ THỜI GIAN CHỜ ESP32 KHỞI ĐỘNG! Có thể mạch đang bị crash (Panic).")
-            if "failed" in boot_log_full.lower() or "error" in boot_log_full.lower() or "panic" in boot_log_full.lower():
-                print("\n[!] PHÁT HIỆN LỖI NGAY LÚC KHỞI ĐỘNG FIRMWARE! Vui lòng kiểm tra lại C code.")
-            ser.close()
-            sys.exit(1)
+        if not args.native:
+            print("Đang chờ ESP32 khởi động và nạp TFLite Model...")
+            
+            # Đọc log boot cho đến khi thấy chữ "Waiting for Python tool"
+            boot_log_full = ""
+            ready = False
+            start_boot_wait = time.time()
+            while time.time() - start_boot_wait < 5: # Chờ tối đa 5 giây
+                if ser.in_waiting > 0:
+                    chunk = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
+                    boot_log_full += chunk
+                    if "Waiting for Python tool" in boot_log_full:
+                        ready = True
+                        break
+                time.sleep(0.05)
+                
+            print("-" * 40)
+            print("[ESP32 BOOT LOG]:")
+            print(boot_log_full.strip())
+            print("-" * 40)
+            
+            # Lấy thông tin Tensor Arena từ log boot
+            arena_used = None
+            arena_match = re.search(r"Actual Arena Used:\s*(\d+)\s*bytes", boot_log_full, re.IGNORECASE)
+            if arena_match:
+                arena_used = arena_match.group(1)
+            
+            if not ready:
+                print("\n[!] QUÁ THỜI GIAN CHỜ ESP32 KHỞI ĐỘNG! Có thể mạch đang bị crash (Panic).")
+                if "failed" in boot_log_full.lower() or "error" in boot_log_full.lower() or "panic" in boot_log_full.lower():
+                    print("\n[!] PHÁT HIỆN LỖI NGAY LÚC KHỞI ĐỘNG FIRMWARE! Vui lòng kiểm tra lại C code.")
+                ser.close()
+                sys.exit(1)
             
         print("\n[*] ESP32 đã sẵn sàng nhận dữ liệu!")
         # An toàn xóa buffer thủ công
@@ -559,6 +580,7 @@ if __name__ == "__main__":
     print("\nBắt đầu test. Nhấn Ctrl + C bất cứ lúc nào để dừng và lưu kết quả hiện tại.")
     
     consecutive_errors = 0 # Cơ chế Fail-safe
+    last_send_time = time.time()
     
     try:
         for i, f in enumerate(selected_files):
@@ -566,7 +588,23 @@ if __name__ == "__main__":
             
             res = send_sample_to_esp32(f, ser)
             if res:
-                print("OK")
+                print("OK", end="")
+                ram_info = []
+                if res.get("Arena_Used"):
+                    ram_info.append(f"Arena: {res['Arena_Used']}B")
+                    if arena_used is None:
+                        arena_used = int(res['Arena_Used'])
+                    else:
+                        arena_used = max(int(arena_used), int(res['Arena_Used']))
+                if res.get("Free_PSRAM"):
+                    ram_info.append(f"FreePSRAM: {res['Free_PSRAM']}B")
+                if res.get("Free_SRAM"):
+                    ram_info.append(f"FreeSRAM: {res['Free_SRAM']}B")
+                
+                if ram_info:
+                    print(f" ({', '.join(ram_info)})")
+                else:
+                    print("")
                 all_results.append(res)
                 consecutive_errors = 0
             else:
@@ -578,7 +616,12 @@ if __name__ == "__main__":
                 print("Chủ động dừng script để không làm đơ Terminal...")
                 break
                 
-            time.sleep(0.05) # Dừng 50ms giữa các sample
+            # Đảm bảo mỗi mẫu được gửi cách nhau chính xác 0.5s giống firmware thực tế
+            elapsed = time.time() - last_send_time
+            if elapsed < 0.5:
+                time.sleep(0.5 - elapsed)
+            last_send_time = time.time()
+            
     except KeyboardInterrupt:
         print("\n\n[!] Bạn đã chủ động dừng chương trình (Ctrl+C).")
         print("[!] Sẽ tiến hành lưu các kết quả đã test được tính đến hiện tại...")
@@ -594,7 +637,10 @@ if __name__ == "__main__":
                 "File": r["File"],
                 "Expected_Class": r["Expected_Class"],
                 "Time_ms": r["Time_us"] / 1000.0,
-                "Is_Stand_Sit_Firmware": r.get("Is_Stand_Sit")
+                "Is_Stand_Sit_Firmware": r.get("Is_Stand_Sit"),
+                "Arena_Used": r.get("Arena_Used"),
+                "Free_PSRAM": r.get("Free_PSRAM"),
+                "Free_SRAM": r.get("Free_SRAM")
             }
             # --- Logic Threshold & Mapping ---
             CLASS_NAMES = ['Walk', 'Run', 'Idle', 'Trans', 'Fall']
@@ -635,6 +681,13 @@ if __name__ == "__main__":
         print(f"- Tổng số mẫu test thành công: {len(df_results)}")
         print(f"- Thời gian Inference trung bình: {df_results['Time_ms'].mean():.2f} ms")
         print(f"- Thời gian Inference Max/Min: {df_results['Time_ms'].max():.2f} / {df_results['Time_ms'].min():.2f} ms")
+        if 'Arena_Used' in df_results.columns and df_results['Arena_Used'].notna().any():
+            print(f"- RAM Peak (Arena) trung bình: {df_results['Arena_Used'].mean():.0f} bytes")
+            print(f"- RAM Peak (Arena) Max/Min : {df_results['Arena_Used'].max():.0f} / {df_results['Arena_Used'].min():.0f} bytes")
+        if 'Free_PSRAM' in df_results.columns and df_results['Free_PSRAM'].notna().any() and df_results['Free_PSRAM'].min() != 4294967295:
+            print(f"- Free PSRAM thấp nhất (Min) : {df_results['Free_PSRAM'].min():.0f} bytes")
+        if 'Free_SRAM' in df_results.columns and df_results['Free_SRAM'].notna().any():
+            print(f"- Free SRAM thấp nhất (Min)  : {df_results['Free_SRAM'].min():.0f} bytes")
         print("="*50)
         
         # In thêm 5 mẫu đầu để xem qua

@@ -1,6 +1,6 @@
 // ============================================================
 // AUTO-GENERATED model data  --  v30_resnet1d
-// TFLite INT8 size : 68824 bytes
+// TFLite INT8 size : 72016 bytes
 // ------------------------------------------------------------
 // Input  : shape=[np.int32(1), np.int32(200), np.int32(6)] dtype=int8 quant(scale=0.0078431377, zero_point=-1)
 // Output : shape=[np.int32(1), np.int32(5)] dtype=int8 quant(scale=0.00390625, zero_point=-128)

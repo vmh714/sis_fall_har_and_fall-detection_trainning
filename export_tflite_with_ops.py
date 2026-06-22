@@ -103,12 +103,34 @@ def export_int8_with_ops(model, X_rep, out_dir, version,
     tflite_path = out_dir / f"model_{version}_int8.tflite"
     tflite_path.write_bytes(tflite_model)
 
-    # --- Doc metadata that tu interpreter ---
+    # --- Doc metadata tu interpreter de lay Input/Output ---
     it = tf.lite.Interpreter(model_content=tflite_model)
     it.allocate_tensors()
     inp = it.get_input_details()[0]
     outp = it.get_output_details()[0]
-    all_ops = sorted({d["op_name"] for d in it._get_ops_details()})
+
+    # --- Doc danh sach Ops CHUAN XAC nhat bang thu vien 'tflite' ---
+    try:
+        import tflite
+        model_fb = tflite.Model.GetRootAsModel(tflite_model, 0)
+        ops_set = set()
+        for i in range(model_fb.OperatorCodesLength()):
+            opcode = model_fb.OperatorCodes(i)
+            # TFLite < 2.4 su dung BuiltinCode(), >= 2.4 dung DeprecatedBuiltinCode() hoac BuiltinCode() phu thuoc schema
+            # Thu lay tu opcode truc tiep
+            try:
+                builtin_code = opcode.BuiltinCode()
+                # Neu builtin_code la 127 (Custom), thi ma thuc su o noi khac, nhung o day model toan builtin
+                name = tflite.BuiltinOperator().OpNameFromValue(builtin_code)
+                ops_set.add(name)
+            except:
+                pass
+        all_ops = sorted(list(ops_set))
+    except ImportError:
+        print("[!] CANH BAO: Ban chua cai dat thu vien 'tflite'. Dang dung tf.lite.Interpreter de quet Ops (CO THE BO SOT MAX_POOL_2D hoac STRIDED_SLICE!)")
+        print("[!] Gợi ý: Hãy chay 'pip install tflite' de quet chinh xac hon.")
+        all_ops = sorted({d["op_name"] for d in it._get_ops_details()})
+
     reg_ops = [op for op in all_ops if op not in _NON_REGISTRABLE]  # ops can dang ky
 
     in_scale, in_zp = inp["quantization"]

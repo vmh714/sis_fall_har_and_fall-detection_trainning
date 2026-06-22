@@ -1,0 +1,27 @@
+
+==================================================
+BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - v30_tcn_optimize_v2
+Dựa trên file: D:\New folder\sis_fall_har_and_fall-detection_trainning\firmware_test_tool\inference_results.csv
+- Tổng số mẫu test thành công: 1000
+- Thời gian Inference trung bình: 217.75 ms
+- Thời gian Inference Max/Min: 218.10 / 217.54 ms
+- Tensor Arena (RAM) sử dụng: 50396 bytes
+==================================================
+              precision    recall  f1-score   support
+
+        Walk     0.9574    0.9000    0.9278       200
+         Run     0.9515    0.9800    0.9655       200
+        Idle     0.8222    0.9250    0.8706       200
+       Trans     0.9091    0.8500    0.8786       200
+        Fall     0.9948    0.9650    0.9797       200
+
+    accuracy                         0.9240      1000
+   macro avg     0.9270    0.9240    0.9244      1000
+weighted avg     0.9270    0.9240    0.9244      1000
+
+==================================================
+KẾT QUẢ ĐÁNH GIÁ CHUYÊN BIỆT LỚP TÉ NGÃ (FALL) TRÊN FIRMWARE:
+  - Số ca ngã thực tế: 200
+  - Số ca ngã phát hiện đúng: 193
+  - TỶ LỆ RECALL TÉ NGÃ (FIRMWARE): 96.50%
+==================================================

@@ -67,6 +67,11 @@ ESP-NN **KHÔNG tăng tốc** (→ chạy reference chậm): **LSTM/GRU**, **dil
 - Với mạng **nhiều tensor nhỏ** (SeparableConv + SE như v25), **metadata phình** → file INT8 lớn hơn cả float weight (v25: 19k params nhưng 80KB, ~75% là overhead). Param count KHÔNG dự đoán được tflite size.
 - Muốn nhỏ flash: **ít tensor to** thắng **nhiều tensor nhỏ**. TFLite KHÔNG nén (flatbuffer thô) — đừng đổ lỗi "thuật toán nén".
 
+### 4.5. Lỗi quét thiếu Ops khi Export (Các Ops ẩn)
+- **Tuyệt đối KHÔNG** chỉ dùng `tf.lite.Interpreter()._get_ops_details()` để trích xuất danh sách Ops cho ESP32. Hàm này của TensorFlow hay **bỏ sót các ops ẩn** (vd: `MAX_POOL_2D` ép từ 1D, `STRIDED_SLICE` do cắt mảng).
+- Hậu quả: Code C++ biên dịch báo thành công nhưng mạch ESP32 **crashes ngay lúc khởi động** vì văng lỗi `Didn't find op for builtin opcode...`.
+- **Cách giải quyết:** Hãy dùng đoạn script `export_tflite_with_ops.py` bản mới nhất đã được cập nhật logic dùng `pip install tflite` để phân tách trực tiếp dữ liệu Flatbuffer. Đảm bảo môi trường export luôn có cài gói `tflite`.
+
 ## 5. Quy ước khi tạo thí nghiệm mới
 
 1. Tạo folder `train_vXX[_mô_tả]/`. Clone notebook/script gần nhất.
