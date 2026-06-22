@@ -1,8 +1,8 @@
 // ============================================================
-// AUTO-GENERATED model data  --  v30_kd2
-// TFLite INT8 size : 55800 bytes
+// AUTO-GENERATED model data  --  v32_w256
+// TFLite INT8 size : 25080 bytes
 // ------------------------------------------------------------
-// Input  : shape=[np.int32(1), np.int32(200), np.int32(6)] dtype=int8 quant(scale=0.0078431377, zero_point=-1)
+// Input  : shape=[np.int32(1), np.int32(256), np.int32(6)] dtype=int8 quant(scale=0.0078431377, zero_point=-1)
 // Output : shape=[np.int32(1), np.int32(5)] dtype=int8 quant(scale=0.00390625, zero_point=-128)
 // INT8<->real:  q = round(real/scale)+zero_point ; real = (q-zero_point)*scale
 // ------------------------------------------------------------
@@ -31,7 +31,7 @@
 #ifndef MODEL_DATA_H_
 #define MODEL_DATA_H_
 
-#define MODEL_INPUT_LEN   1200
+#define MODEL_INPUT_LEN   1536
 #define MODEL_OUTPUT_LEN  5
 #define MODEL_NUM_OPS     8
 

@@ -24,7 +24,10 @@ tflite::MicroInterpreter *interpreter = nullptr;
 TfLiteTensor *input = nullptr;
 TfLiteTensor *output = nullptr;
 
-// Thu nhỏ kích thước xuống 100KB để vừa với SRAM nội bộ
+// === Vị trí Tensor Arena: 0 = SRAM nội bộ (mặc định — test "arena ở SRAM"); 1 = PSRAM ===
+// Khi arena < 64KB (vừa data-cache S3) thì SRAM vs PSRAM tốc độ ~ngang nhau (compute-bound).
+#define ARENA_USE_PSRAM 0
+// Arena CNN v30/v30_kd2/v32 thực dùng ~12-20KB (theo window); cấp 100KB dư headroom.
 constexpr int kTensorArenaSize = 100 * 1024;
 
 // uint8_t tensor_arena[kTensorArenaSize];
@@ -71,15 +74,22 @@ void ram_monitor_task(void *pvParameters) {
 int tflite_init(void) {
   tflite::InitializeTarget();
 
-  // 1. Cấp phát Tensor Arena vào SRAM Nội bộ (nhanh hơn PSRAM rất nhiều)
-  tensor_arena =
-      (uint8_t *)heap_caps_malloc(kTensorArenaSize, MALLOC_CAP_INTERNAL);
+  // 1. Cấp phát Tensor Arena (vị trí theo ARENA_USE_PSRAM).
+#if ARENA_USE_PSRAM
+  const uint32_t arena_caps = MALLOC_CAP_SPIRAM;
+  const char *arena_loc = "PSRAM";
+#else
+  const uint32_t arena_caps = MALLOC_CAP_INTERNAL;
+  const char *arena_loc = "SRAM";
+#endif
+  tensor_arena = (uint8_t *)heap_caps_malloc(kTensorArenaSize, arena_caps);
   if (tensor_arena == nullptr) {
-    ESP_LOGE(TAG, "Lỗi: Không thể cấp phát %d bytes trên SRAM!",
-             kTensorArenaSize);
+    ESP_LOGE(TAG, "Lỗi: Không thể cấp phát %d bytes trên %s!", kTensorArenaSize,
+             arena_loc);
     return -1;
   }
-  ESP_LOGI(TAG, "Đã cấp phát thành công %d bytes trên SRAM.", kTensorArenaSize);
+  ESP_LOGI(TAG, "Đã cấp phát thành công %d bytes trên %s.", kTensorArenaSize,
+           arena_loc);
 
   // 2. Load mô hình
   model = tflite::GetModel(g_model_data);
@@ -91,25 +101,19 @@ int tflite_init(void) {
     return -1;
   }
 
-  // 3. Đăng ký các Ops (Bao gồm đủ Ops cho cả ResNet1D và TCN Optimize)
-  static tflite::MicroMutableOpResolver<20> resolver;
-  resolver.AddAdd();
+  // 3. Đăng ký Ops — CNN ESP-NN v30/v30_kd2/v32 dùng CHUNG 8 ops (lấy từ model_data.h auto-gen).
+  //    CNN thuần ESP-NN; relu6 đã fuse vào Conv nên KHÔNG có op RELU6 riêng.
+  //    (Model cũ LSTM/ResNet1D cần thêm AddAdd/AddMul/AddLogistic/AddReduceMax/
+  //     AddStridedSlice/AddRelu/AddMinimum/AddMaximum/AddUnidirectionalSequenceLSTM — xem git history.)
+  static tflite::MicroMutableOpResolver<8> resolver;
   resolver.AddConcatenation();
   resolver.AddConv2D();
   resolver.AddDepthwiseConv2D();
   resolver.AddFullyConnected();
-  resolver.AddLogistic();
-  resolver.AddMean();
-  resolver.AddMul();
-  resolver.AddMinimum();
-  resolver.AddMaximum();
-  resolver.AddRelu();
-  resolver.AddReduceMax();
   resolver.AddMaxPool2D();
-  resolver.AddStridedSlice();
+  resolver.AddMean();
   resolver.AddReshape();
   resolver.AddSoftmax();
-  resolver.AddUnidirectionalSequenceLSTM();
 
   // 4. Build Interpreter
   static tflite::MicroInterpreter static_interpreter(
@@ -353,7 +357,7 @@ void tflite_run_inference_with_data(float *rx_data, size_t num_bytes) {
   if (predicted_class == IDLE_CLASS_INDEX) {
     double sum_y_sq = 0.0f;
     double sum_xz_sq = 0.0f;
-    int num_samples = num_bytes / (6 * sizeof(float)); // Thường là 200
+    int num_samples = num_bytes / (6 * sizeof(float)); // = WINDOW_SIZE (v32_w128->128 / w256->256)
     for (int i = 0; i < num_samples; i++) {
       float ax = rx_data[i * 6 + 0];
       float ay = rx_data[i * 6 + 1];

@@ -1,5 +1,5 @@
 // ============================================================
-// AUTO-GENERATED model data  --  v30_kd2
+// AUTO-GENERATED model data  --  v30_kd2_a03
 // TFLite INT8 size : 55800 bytes
 // ------------------------------------------------------------
 // Input  : shape=[np.int32(1), np.int32(200), np.int32(6)] dtype=int8 quant(scale=0.0078431377, zero_point=-1)

@@ -87,6 +87,25 @@ PIPELINES = {
         "trans_cut": "su kien gyro rolling-RMS > 20 dps",
         "models": "v30, v30_lstm32 (v31 4-kenh: firmware tu tinh gyro_mag tu 6 kenh CSV)",
         "gen": "Chay cell windowing notebook train_v30 -> SisFall_dataset_Windowed_v30 (+ cache_v30)",
+        "window": 200,
+    },
+    "v32_w256": {
+        "folder": "SisFall_dataset_Windowed_v32_w256_TEST",
+        "gyro_unit": "dps (raw*4000/65536, KHONG *pi/180)",
+        "firmware_norm": "accel clip(+-8g)/8 ; gyro clip(+-500 dps)/500",
+        "trans_cut": "su kien gyro rolling-RMS > 20 dps ; Fall event-centered (left_ratio 0.5)",
+        "models": "v32_w256 (CNN 6-kenh, window 256)",
+        "gen": "python prepare_test_dataset_v32.py --window 256 -> SisFall_dataset_Windowed_v32_w256_TEST",
+        "window": 256,
+    },
+    "v32_w128": {
+        "folder": "SisFall_dataset_Windowed_v32_w128_TEST",
+        "gyro_unit": "dps (raw*4000/65536, KHONG *pi/180)",
+        "firmware_norm": "accel clip(+-8g)/8 ; gyro clip(+-500 dps)/500",
+        "trans_cut": "su kien gyro rolling-RMS > 20 dps ; Fall event-centered (left_ratio 0.45)",
+        "models": "v32_w128 (CNN 6-kenh, window 128)",
+        "gen": "python prepare_test_dataset_v32.py --window 128 -> SisFall_dataset_Windowed_v32_w128_TEST",
+        "window": 128,
     },
     "resize": {
         "folder": "SisFall_dataset_Windowed_new",
@@ -113,6 +132,10 @@ PIPELINES = {
         "gen": "pipeline v25/v22 (decimate) -> tool_for_new_dataset/SisFall_dataset_Windowed",
     },
 }
+
+# Số mẫu/cửa sổ — gán theo --pipeline trong __main__ (200 cho v30, 256 cho v32_w256...).
+WINDOW_SIZE = 200
+
 
 def print_pipelines():
     print("="*74)
@@ -157,10 +180,10 @@ def send_sample_to_esp32(csv_path, ser):
         if col not in df.columns:
             return None
 
-    features = df[required_columns].head(200).values.astype(np.float32)
-    
-    if features.shape[0] < 200:
-        pad_size = 200 - features.shape[0]
+    features = df[required_columns].head(WINDOW_SIZE).values.astype(np.float32)
+
+    if features.shape[0] < WINDOW_SIZE:
+        pad_size = WINDOW_SIZE - features.shape[0]
         padding = np.zeros((pad_size, len(required_columns)), dtype=np.float32)
         features = np.vstack((features, padding))
     
@@ -447,6 +470,9 @@ if __name__ == "__main__":
         args.folder = pcfg["folder"]
     if args.model_name is None:
         args.model_name = args.pipeline
+    # Số mẫu/cửa sổ phải KHỚP model đang flash (firmware tự suy expected_bytes từ input dims).
+    WINDOW_SIZE = pcfg.get("window", 200)
+    print(f"[*] WINDOW_SIZE = {WINDOW_SIZE} mẫu/cửa sổ (gửi {WINDOW_SIZE}x6 float = {WINDOW_SIZE*6*4} bytes/mẫu)")
     print("="*74)
     print(f"[*] PIPELINE = '{args.pipeline}'  ->  folder CSV = {args.folder}")
     print(f"    gyro      : {pcfg['gyro_unit']}")

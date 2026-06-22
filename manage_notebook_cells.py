@@ -6,7 +6,8 @@ def main():
     parser = argparse.ArgumentParser(description="Replace a specific cell in a Jupyter notebook.")
     parser.add_argument("--notebook", required=True, help="Path to the notebook (.ipynb)")
     parser.add_argument("--search-string", required=True, help="Unique string to identify the target cell (e.g., 'def build_model' or 'class KFoldDataManager')")
-    parser.add_argument("--code-file", required=True, help="Path to the python file containing the new cell content")
+    parser.add_argument("--code-file", required=True, help="Path to the file containing the new cell content")
+    parser.add_argument("--cell-type", default="code", choices=["code", "markdown", "any"], help="Loại cell cần tìm/thay (mặc định 'code' — giữ nguyên hành vi cũ).")
     parser.add_argument("--output", help="Path to save the modified notebook. Overwrites original if not specified.")
     
     args = parser.parse_args()
@@ -36,7 +37,7 @@ def main():
     # Find target cell
     target_idx = -1
     for i, cell in enumerate(nb['cells']):
-        if cell['cell_type'] == 'code':
+        if args.cell_type == 'any' or cell['cell_type'] == args.cell_type:
             source_text = "".join(cell['source'])
             if args.search_string in source_text:
                 if target_idx != -1:
