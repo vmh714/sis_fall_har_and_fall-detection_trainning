@@ -1,5 +1,6 @@
 #include "tflite_wrapper.h"
 
+#include "sdkconfig.h"     // Macro CONFIG_* (ESP-NN, CPU freq, compiler opt) cho BUILD CONFIG log
 #include "esp_heap_caps.h" // Thêm thư viện để cấp phát PSRAM
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -17,6 +18,12 @@
 #include "model_data.h"
 
 static const char *TAG = "TFLiteWrapper";
+
+// === Chuẩn hoá GYRO theo dòng model (path 6 trục) ===
+//   0 = v30/v31/v32  : gyro dps, clip(±500)/500
+//   1 = v25/dòng cũ  : gyro /2000, KHÔNG clip (khớp ml_pipeline.py apply_preprocessing)
+// PHẢI đổi theo model đang nạp; quên đổi -> gyro lệch ~4x -> dự đoán sai (nhất Trans/Fall).
+#define GYRO_NORM_DIV2000 1   // ĐANG TEST v25 — nhớ đặt lại 0 khi quay về v30/v31/v32
 
 namespace {
 const tflite::Model *model = nullptr;
@@ -101,19 +108,31 @@ int tflite_init(void) {
     return -1;
   }
 
-  // 3. Đăng ký Ops — CNN ESP-NN v30/v30_kd2/v32 dùng CHUNG 8 ops (lấy từ model_data.h auto-gen).
-  //    CNN thuần ESP-NN; relu6 đã fuse vào Conv nên KHÔNG có op RELU6 riêng.
-  //    (Model cũ LSTM/ResNet1D cần thêm AddAdd/AddMul/AddLogistic/AddReduceMax/
-  //     AddStridedSlice/AddRelu/AddMinimum/AddMaximum/AddUnidirectionalSequenceLSTM — xem git history.)
-  static tflite::MicroMutableOpResolver<8> resolver;
+  /// 3. Đăng ký Ops — resolver HỢP (union) cho cả 2 họ model để swap qua lại
+  ///    KHÔNG phải sửa wrapper mỗi lần (đây là test harness hay đổi model):
+  ///      - CNN (v30/v30_kd2/v30_optimize/v32): Concatenation, Conv2D, DepthwiseConv2D,
+  ///        FullyConnected, MaxPool2D, Mean, Reshape, Softmax (8 ops).
+  ///      - TCN (v30_tcn): thêm Add, Logistic, Mul, ReduceMax, StridedSlice (bỏ DepthwiseConv2D/MaxPool2D).
+  ///    Đăng ký dư op model không dùng là vô hại (interpreter chỉ gọi op model tham chiếu),
+  ///    chỉ tốn vài byte. Union = 17 ops (LSTM cho v30_lstm32; ExpandDims/Pack/Shape cho v25 ResNet1D+SE).
+  static tflite::MicroMutableOpResolver<17> resolver;
+  resolver.AddAdd();
   resolver.AddConcatenation();
   resolver.AddConv2D();
   resolver.AddDepthwiseConv2D();
   resolver.AddFullyConnected();
+  resolver.AddLogistic();
   resolver.AddMaxPool2D();
   resolver.AddMean();
+  resolver.AddMul();
+  resolver.AddReduceMax();
   resolver.AddReshape();
   resolver.AddSoftmax();
+  resolver.AddStridedSlice();
+  resolver.AddUnidirectionalSequenceLSTM();
+  resolver.AddExpandDims();  // v25 ResNet1D (SE block)
+  resolver.AddPack();        // v25
+  resolver.AddShape();       // v25
 
   // 4. Build Interpreter
   static tflite::MicroInterpreter static_interpreter(
@@ -131,8 +150,32 @@ int tflite_init(void) {
   vTaskDelay(pdMS_TO_TICKS(20));
   ESP_LOGI(TAG, "================================================");
   ESP_LOGI(TAG, "TFLITE ARENA CALCULATION RESULTS:");
-  ESP_LOGI(TAG, "Total Arena Size Configured: %d bytes (SRAM)", kTensorArenaSize);
+  // arena_loc đã phản ánh đúng ARENA_USE_PSRAM (SRAM nội bộ vs PSRAM), không hardcode.
+  ESP_LOGI(TAG, "Total Arena Size Configured: %d bytes (%s)", kTensorArenaSize, arena_loc);
   ESP_LOGI(TAG, "Actual Arena Used: %d bytes", (int)interpreter->arena_used_bytes());
+  ESP_LOGI(TAG, "================================================");
+
+  /// Khai báo cấu hình build NGAY trong boot log để tool host parse vào report —
+  /// một nguồn sự thật duy nhất, tránh lặp lại nghịch lý "đo trên build không có ESP-NN
+  /// nhưng report không ghi lại". ESP-NN/CPU freq/opt lấy từ macro sdkconfig (compile-time)
+  /// nên luôn khớp đúng binary đang chạy.
+  ESP_LOGI(TAG, "BUILD CONFIG (dieu kien do hieu nang):");
+  ESP_LOGI(TAG, "  Arena Location: %s", arena_loc);
+#if defined(CONFIG_NN_OPTIMIZED)
+  ESP_LOGI(TAG, "  ESP-NN: ACTIVE (optimized assembly kernels)");
+#else
+  ESP_LOGI(TAG, "  ESP-NN: REFERENCE (ANSI-C fallback, CHUA toi uu)");
+#endif
+  ESP_LOGI(TAG, "  CPU Freq: %d MHz", CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);
+#if defined(CONFIG_COMPILER_OPTIMIZATION_PERF)
+  ESP_LOGI(TAG, "  Compiler Opt: -O2 (Performance)");
+#elif defined(CONFIG_COMPILER_OPTIMIZATION_SIZE)
+  ESP_LOGI(TAG, "  Compiler Opt: -Os (Size)");
+#elif defined(CONFIG_COMPILER_OPTIMIZATION_DEBUG)
+  ESP_LOGI(TAG, "  Compiler Opt: -Og (Debug)");
+#else
+  ESP_LOGI(TAG, "  Compiler Opt: -O0 (None)");
+#endif
   ESP_LOGI(TAG, "================================================");
   vTaskDelay(pdMS_TO_TICKS(20));
 
@@ -272,9 +315,13 @@ void tflite_run_inference_with_data(float *rx_data, size_t num_bytes) {
           if (val < -8.0f) val = -8.0f;
           val = val / 8.0f;
         } else {
+#if GYRO_NORM_DIV2000
+          val = val / 2000.0f;  // v25: chỉ chia 2000, không clip
+#else
           if (val > 500.0f) val = 500.0f;
           if (val < -500.0f) val = -500.0f;
           val = val / 500.0f;
+#endif
         }
 
         int32_t quantized_val = round(val / input->params.scale) + input->params.zero_point;

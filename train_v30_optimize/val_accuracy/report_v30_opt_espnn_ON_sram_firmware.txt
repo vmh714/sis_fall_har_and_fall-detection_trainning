@@ -1,0 +1,35 @@
+
+==================================================
+BÁO CÁO PHÂN LOẠI TẬP KIỂM THỬ TRÊN FIRMWARE - v30_opt_espnn_ON
+Dựa trên file: D:\datn\sis_fall_har_and_fall-detection_trainning\firmware_test_tool\inference_results.csv
+- Tổng số mẫu test thành công: 1000
+- Thời gian Inference trung bình: 11.20 ms
+- Thời gian Inference Max/Min: 11.63 / 11.03 ms
+- Tensor Arena (SRAM) sử dụng: 28276 bytes
+--------------------------------------------------
+CẤU HÌNH BUILD (điều kiện đo hiệu năng):
+  - Arena Location : SRAM
+  - ESP-NN         : ACTIVE (optimized assembly kernels)
+  - esp-tflite-micro : 1.3.7
+  - CPU Freq       : 240 MHz
+  - Compiler Opt   : -O2 (Performance)
+  - ESP-NN ACCELERATION : ON (esp-nn optimized + wrapper >=1.3.7)
+==================================================
+              precision    recall  f1-score   support
+
+        Walk     0.9227    0.9550    0.9386       200
+         Run     0.9750    0.9750    0.9750       200
+        Idle     0.9289    0.9150    0.9219       200
+       Trans     0.9453    0.9500    0.9476       200
+        Fall     1.0000    0.9750    0.9873       200
+
+    accuracy                         0.9540      1000
+   macro avg     0.9544    0.9540    0.9541      1000
+weighted avg     0.9544    0.9540    0.9541      1000
+
+==================================================
+KẾT QUẢ ĐÁNH GIÁ CHUYÊN BIỆT LỚP TÉ NGÃ (FALL) TRÊN FIRMWARE:
+  - Số ca ngã thực tế: 200
+  - Số ca ngã phát hiện đúng: 195
+  - TỶ LỆ RECALL TÉ NGÃ (FIRMWARE): 97.50%
+==================================================

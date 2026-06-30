@@ -43,7 +43,7 @@ model_data.cc
 .DS_Store
 Thumbs.db
 
-sis_fall_firmware_inference/build/
+sis_fall_firmware_inference/build*/
 sis_fall_firmware_inference/managed_components/
 
 test_int8.py

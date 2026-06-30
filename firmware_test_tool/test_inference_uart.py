@@ -81,7 +81,7 @@ plt.rcParams['axes.unicode_minus'] = False
 # ============================================================
 PIPELINES = {
     "v30": {
-        "folder": "SisFall_dataset_Windowed_v30",
+        "folder": "SisFall_dataset_Windowed_v30_TEST",
         "gyro_unit": "dps (raw*4000/65536, KHONG *pi/180)",
         "firmware_norm": "accel clip(+-8g)/8 ; gyro clip(+-500 dps)/500",
         "trans_cut": "su kien gyro rolling-RMS > 20 dps",
@@ -124,12 +124,13 @@ PIPELINES = {
         "gen": "Chay cell windowing notebook SisFall_KFold_Experiments_v3 -> SisFall_dataset_Windowed_v3kf",
     },
     "v25": {
-        "folder": "tool_for_new_dataset/SisFall_dataset_Windowed",
-        "gyro_unit": "rad/s (cu)",
-        "firmware_norm": "gyro /2000 rad/s",
-        "trans_cut": "dinh accel + decimate + them D09/D10/D14",
-        "models": "v25 ResNet, v22 TCN",
-        "gen": "pipeline v25/v22 (decimate) -> tool_for_new_dataset/SisFall_dataset_Windowed",
+        "folder": "SisFall_dataset_Windowed_v25_TEST",
+        "gyro_unit": "dps (raw*4000/65536, KHONG *pi/180)",
+        "firmware_norm": "accel clip(+-8g)/8 ; gyro /2000 (KHONG clip) -> firmware GYRO_NORM_DIV2000=1",
+        "trans_cut": "dinh accel-SVM (find_peaks top-2) + decimate q=2 ; them D09/D10/D14, D18/D19",
+        "models": "v25 ResNet-1D (SeparableConv + SE block)",
+        "gen": "python prepare_test_dataset_v25.py -> SisFall_dataset_Windowed_v25_TEST",
+        "window": 200,
     },
 }
 
@@ -232,11 +233,12 @@ def send_sample_to_esp32(csv_path, ser):
     # --- 2. BẮN DATA (Chia chunk nhỏ để CH340/CP2102 không bị tràn FIFO) ---
     bytes_sent = 0
     try:
-        chunk_size = 256
+        # Baud cao (921600): chunk lớn + sleep cực nhỏ. Firmware RX ring 8192B nên 1024B/chunk an toàn.
+        chunk_size = 1024
         for i in range(0, len(byte_data), chunk_size):
             chunk = byte_data[i:i+chunk_size]
             bytes_sent += ser.write(chunk)
-            time.sleep(0.002) # Delay 2ms cực nhỏ để chip USB xả kịp buffer
+            time.sleep(0.0005) # delay rất nhỏ để chip USB xả buffer (tránh tràn FIFO trên chip yếu)
     except Exception as e:
         print(f"\n[LỖI] Lỗi ghi data: {e}")
         return None
@@ -282,7 +284,61 @@ def send_sample_to_esp32(csv_path, ser):
     print("\n[LỖI] Timeout! ESP32 xử lý data xong nhưng không trả về JSON.")
     return None
 
-def run_evaluation(csv_path, arena_used=None, model_name="model"):
+def parse_build_config(boot_log):
+    """Trích cấu hình build (Arena loc / ESP-NN / CPU freq / Compiler opt) từ boot log
+    firmware (block 'BUILD CONFIG'). Trả về dict, key thiếu thì bỏ qua."""
+    cfg = {}
+    patterns = {
+        "arena_loc":    r"Arena Location:\s*(\S+)",
+        "esp_nn":       r"ESP-NN:\s*(.+)",
+        "cpu_freq":     r"CPU Freq:\s*(\d+)\s*MHz",
+        "compiler_opt": r"Compiler Opt:\s*(.+)",
+    }
+    for key, pat in patterns.items():
+        m = re.search(pat, boot_log, re.IGNORECASE)
+        if m:
+            cfg[key] = m.group(1).strip()
+    return cfg
+
+
+def get_tflite_micro_version(fw_project_dir=None):
+    """Đọc version esp-tflite-micro THỰC SỰ được compile từ project firmware
+    (managed_components). Đây là bằng chứng phân biệt build có ESP-NN dispatch đúng
+    (>=1.3.7) hay dính bug channels=0 làm mất tăng tốc (<=1.3.6). Dòng 'ESP-NN: ACTIVE'
+    của boot log KHÔNG đủ vì nó đúng cả ở build chậm. Trả về str version hoặc None."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = []
+    if fw_project_dir:
+        candidates.append(fw_project_dir)
+    # Mặc định: project firmware test là thư mục anh em của firmware_test_tool/
+    candidates.append(os.path.join(script_dir, "..", "sis_fall_firmware_inference"))
+    candidates.append(os.path.join(script_dir, ".."))
+    for base in candidates:
+        yml = os.path.join(base, "managed_components",
+                           "espressif__esp-tflite-micro", "idf_component.yml")
+        if os.path.isfile(yml):
+            try:
+                with open(yml, encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        m = re.match(r'\s*version:\s*["\']?([0-9][0-9.]*)', line)
+                        if m:
+                            return m.group(1)
+            except Exception:
+                pass
+    return None
+
+
+def _ver_ge(ver, target=(1, 3, 7)):
+    """So sánh chuỗi version 'x.y.z' >= target tuple. Lỗi parse -> False."""
+    try:
+        parts = tuple(int(x) for x in ver.split(".")[:3])
+        parts += (0,) * (3 - len(parts))
+        return parts >= target
+    except Exception:
+        return False
+
+
+def run_evaluation(csv_path, arena_used=None, model_name="model", build_cfg=None):
     if not os.path.exists(csv_path):
         print(f"\n[LỖI] Không tìm thấy file '{csv_path}' để đánh giá hiệu năng!")
         return
@@ -344,9 +400,44 @@ def run_evaluation(csv_path, arena_used=None, model_name="model"):
         time_info += f"- Thời gian Inference trung bình: {avg_time:.2f} ms\n"
         time_info += f"- Thời gian Inference Max/Min: {max_time:.2f} / {min_time:.2f} ms\n"
         
+    build_cfg = build_cfg or {}
+    # Nhãn arena ghi đúng vị trí (SRAM/PSRAM) firmware báo, thay vì "(RAM)" mơ hồ.
+    arena_loc = build_cfg.get("arena_loc", "RAM")
     arena_info = ""
     if arena_used is not None:
-        arena_info = f"- Tensor Arena (RAM) sử dụng: {arena_used} bytes\n"
+        arena_info = f"- Tensor Arena ({arena_loc}) sử dụng: {arena_used} bytes\n"
+
+    # Khối CẤU HÌNH BUILD — ghi rõ điều kiện đo (đặc biệt ESP-NN active) để số liệu
+    # không bị hiểu nhầm khi so sánh giữa các lần build.
+    build_info = ""
+    if build_cfg:
+        build_info += "-"*50 + "\n"
+        build_info += "CẤU HÌNH BUILD (điều kiện đo hiệu năng):\n"
+        if "arena_loc" in build_cfg:
+            build_info += f"  - Arena Location : {build_cfg['arena_loc']}\n"
+        if "esp_nn" in build_cfg:
+            build_info += f"  - ESP-NN         : {build_cfg['esp_nn']}\n"
+        if "tflite_micro" in build_cfg:
+            build_info += f"  - esp-tflite-micro : {build_cfg['tflite_micro']}\n"
+        if "cpu_freq" in build_cfg:
+            build_info += f"  - CPU Freq       : {build_cfg['cpu_freq']} MHz\n"
+        if "compiler_opt" in build_cfg:
+            build_info += f"  - Compiler Opt   : {build_cfg['compiler_opt']}\n"
+        # Verdict 2 TRỤC, chỉ "ON" khi cả hai đạt:
+        #  (1) esp-nn build dạng optimized (NN_OPTIMIZED) hay ANSI-C reference (boot log)
+        #  (2) wrapper esp-tflite-micro >=1.3.7 (đã fix channels=0) hay <=1.3.6 (dính bug)
+        # Hỗ trợ baseline so sánh ESP-NN active vs deactivated cho luận văn.
+        esp_nn_opt = "ACTIVE" in build_cfg.get("esp_nn", "").upper()
+        tfm = build_cfg.get("tflite_micro")
+        wrapper_ok = bool(tfm) and _ver_ge(tfm)
+        if not esp_nn_opt:
+            build_info += ("  - ESP-NN ACCELERATION : OFF (esp-nn build ANSI-C reference "
+                           "-> KHONG tang toc)\n")
+        elif not wrapper_ok:
+            build_info += ("  - ESP-NN ACCELERATION : OFF/CRIPPLED (wrapper "
+                           f"{tfm or '?'} <=1.3.6 bug channels=0 -> chay generic ~5x cham)\n")
+        else:
+            build_info += "  - ESP-NN ACCELERATION : ON (esp-nn optimized + wrapper >=1.3.7)\n"
 
     # Tạo chuỗi báo cáo
     report_str = "\n" + "="*50 + "\n"
@@ -355,6 +446,7 @@ def run_evaluation(csv_path, arena_used=None, model_name="model"):
     report_str += f"- Tổng số mẫu test thành công: {total_samples}\n"
     report_str += time_info
     report_str += arena_info
+    report_str += build_info
     report_str += "="*50 + "\n"
     
     cls_report = classification_report(y_true, y_pred, labels=CLASS_NAMES, target_names=CLASS_NAMES, digits=4)
@@ -453,10 +545,12 @@ if __name__ == "__main__":
     parser.add_argument("--folder", "-d", type=str, default=None, help="Thư mục CSV windowed (mặc định: tự lấy theo --pipeline)")
     parser.add_argument("--samples", "-n", type=int, default=100, help="Số lượng file muốn bốc bừa CHO MỖI NHÃN")
     parser.add_argument("--port", "-p", type=str, help="Cổng COM (ví dụ: COM3). Để trống sẽ TỰ ĐỘNG TÌM.")
-    parser.add_argument("--baud", "-b", type=int, default=115200, help="Tốc độ Baudrate")
+    parser.add_argument("--baud", "-b", type=int, default=921600, help="Tốc độ Baudrate (mặc định 921600; phải KHỚP CONFIG_ESP_CONSOLE_UART_BAUDRATE của firmware)")
+    parser.add_argument("--pace", type=float, default=0.2, help="Giãn cách tối thiểu giữa 2 mẫu (giây). Mặc định 0.2. Đặt 0 = nhanh nhất, 0.5 = mô phỏng 2Hz như firmware thật.")
     parser.add_argument("--eval-only", action="store_true", help="Chỉ chạy đánh giá hiệu năng từ file CSV có sẵn, không thực hiện bắn UART")
     parser.add_argument("--native", action="store_true", help="Kích hoạt chế độ Native USB (cho ESP32-S3 cắm trực tiếp không qua chip UART)")
-    
+    parser.add_argument("--fw-project", type=str, default=None, help="Đường dẫn project firmware đang flash (để đọc version esp-tflite-micro). Mặc định: ../sis_fall_firmware_inference")
+
     args = parser.parse_args()
 
     # Liệt kê pipeline rồi thoát
@@ -470,6 +564,21 @@ if __name__ == "__main__":
         args.folder = pcfg["folder"]
     if args.model_name is None:
         args.model_name = args.pipeline
+
+    # Dò folder windowed ở nhiều base: chạy script từ đâu cũng tìm được.
+    # Folder dataset nằm ở project root (cha của firmware_test_tool/), không nằm cùng script.
+    if not os.path.isabs(args.folder) and not os.path.isdir(args.folder):
+        _script_dir = os.path.dirname(os.path.abspath(__file__))
+        _candidates = [
+            args.folder,                                      # tương đối theo CWD
+            os.path.join(_script_dir, args.folder),           # cùng thư mục script
+            os.path.join(_script_dir, "..", args.folder),     # project root (cha)
+        ]
+        for _c in _candidates:
+            if os.path.isdir(_c):
+                args.folder = os.path.normpath(_c)
+                print(f"[*] Đã tìm thấy folder windowed tại: {args.folder}")
+                break
     # Số mẫu/cửa sổ phải KHỚP model đang flash (firmware tự suy expected_bytes từ input dims).
     WINDOW_SIZE = pcfg.get("window", 200)
     print(f"[*] WINDOW_SIZE = {WINDOW_SIZE} mẫu/cửa sổ (gửi {WINDOW_SIZE}x6 float = {WINDOW_SIZE*6*4} bytes/mẫu)")
@@ -519,10 +628,12 @@ if __name__ == "__main__":
             ser.setRTS(True)
         else:
             # BẮT BUỘC phải có 2 dòng này để nhả chân EN/BOOT cho các mạch dùng chip CP2102/CH340, nếu không ESP32 sẽ tịt ngòi
+            # (KHÔNG được pulse RTS/DTR để "reset" — mạch CH343 này sẽ bị treo, mất boot log + fail handshake).
             ser.setDTR(False)
             ser.setRTS(False)
 
         arena_used = None
+        build_cfg = {}
         if not args.native:
             print("Đang chờ ESP32 khởi động và nạp TFLite Model...")
             
@@ -549,13 +660,34 @@ if __name__ == "__main__":
             arena_match = re.search(r"Actual Arena Used:\s*(\d+)\s*bytes", boot_log_full, re.IGNORECASE)
             if arena_match:
                 arena_used = arena_match.group(1)
-            
+
+            # Lấy cấu hình build (Arena loc / ESP-NN / CPU freq / opt) từ block BUILD CONFIG
+            build_cfg = parse_build_config(boot_log_full)
+            # Đọc version esp-tflite-micro thực compile (bằng chứng cứng phân biệt nhanh/chậm).
+            tfm_ver = get_tflite_micro_version(args.fw_project)
+            if tfm_ver:
+                build_cfg["tflite_micro"] = tfm_ver
+            if build_cfg:
+                print(f"[*] BUILD CONFIG: {build_cfg}")
+                # CHỈ cảnh báo ESP-NN khi THỰC SỰ đọc được trạng thái từ boot log,
+                # tránh báo nhầm khi boot log rỗng (esp_nn không có trong build_cfg).
+                if "esp_nn" in build_cfg and "ACTIVE" not in build_cfg["esp_nn"].upper():
+                    print("[!] CẢNH BÁO: ESP-NN KHÔNG active trong build này -> inference sẽ chậm ~3x!")
+                if tfm_ver and not _ver_ge(tfm_ver):
+                    print(f"[!] CẢNH BÁO: esp-tflite-micro {tfm_ver} <=1.3.6 dính bug channels=0 "
+                          "-> ESP-NN KHÔNG tăng tốc (chậm ~5x). Nâng lên >=1.3.7!")
+
             if not ready:
-                print("\n[!] QUÁ THỜI GIAN CHỜ ESP32 KHỞI ĐỘNG! Có thể mạch đang bị crash (Panic).")
-                if "failed" in boot_log_full.lower() or "error" in boot_log_full.lower() or "panic" in boot_log_full.lower():
-                    print("\n[!] PHÁT HIỆN LỖI NGAY LÚC KHỞI ĐỘNG FIRMWARE! Vui lòng kiểm tra lại C code.")
-                ser.close()
-                sys.exit(1)
+                low = boot_log_full.lower()
+                if any(k in low for k in ("panic", "guru meditation", "backtrace", "abort()", "rst:")):
+                    print("\n[!] PHÁT HIỆN CRASH/PANIC lúc khởi động firmware! Kiểm tra lại C code.")
+                    ser.close()
+                    sys.exit(1)
+                # Boot log rỗng thường KHÔNG phải crash: mạch đã boot xong trước khi tool mở cổng.
+                # Test VẪN CHẠY được vì mỗi mẫu đều handshake SYNC->RDY riêng.
+                print("\n[!] Không bắt được boot log (mạch có thể đã boot từ trước, hoặc baud lệch).")
+                print("    -> BUILD CONFIG/arena sẽ THIẾU trong report, nhưng TEST VẪN TIẾP TỤC.")
+                print("    -> Muốn có boot log: nhấn nút RESET trên mạch rồi chạy lại NGAY, hoặc kiểm tra baud khớp 921600.")
             
         print("\n[*] ESP32 đã sẵn sàng nhận dữ liệu!")
         # An toàn xóa buffer thủ công
@@ -642,10 +774,12 @@ if __name__ == "__main__":
                 print("Chủ động dừng script để không làm đơ Terminal...")
                 break
                 
-            # Đảm bảo mỗi mẫu được gửi cách nhau chính xác 0.5s giống firmware thực tế
-            elapsed = time.time() - last_send_time
-            if elapsed < 0.5:
-                time.sleep(0.5 - elapsed)
+            # Pacing giữa các mẫu — mặc định 0.2s. Protocol đã là request-response
+            # (SYNC->RDY->data->JSON); 0.2s đủ thoáng cho mạch ổn định, --pace 0 nếu muốn nhanh tối đa.
+            if args.pace > 0:
+                elapsed = time.time() - last_send_time
+                if elapsed < args.pace:
+                    time.sleep(args.pace - elapsed)
             last_send_time = time.time()
             
     except KeyboardInterrupt:
@@ -721,6 +855,6 @@ if __name__ == "__main__":
         print(df_results.head(5).to_string())
         
         # Tự động gọi run_evaluation
-        run_evaluation(out_file, arena_used=arena_used, model_name=args.model_name)
+        run_evaluation(out_file, arena_used=arena_used, model_name=args.model_name, build_cfg=build_cfg)
     else:
         print("Không có kết quả nào được trả về hợp lệ từ ESP32.")
